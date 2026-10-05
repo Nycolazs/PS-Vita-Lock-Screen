@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PS Vita Classic Palette -->
+    <color name="vita_blue_dark">#0B1B3D</color>
+    <color name="vita_blue_primary">#003791</color>
+    <color name="vita_blue_accent">#0070D1</color>
+    <color name="vita_cyan">#00A3FF</color>
+    <color name="vita_white">#FFFFFF</color>
+    <color name="vita_white_80">#CCFFFFFF</color>
+    <color name="vita_white_50">#80FFFFFF</color>
+    <color name="vita_black_overlay">#80000000</color>
+    <color name="vita_peel_back">#E8ECEF</color>
+    <color name="vita_peel_shadow">#90000000</color>
+
+    <!-- Theme Colors -->
+    <color name="theme_blue">#003791</color>
+    <color name="theme_red">#8B0000</color>
+    <color name="theme_green">#005A2B</color>
+    <color name="theme_black">#121212</color>
+    <color name="theme_purple">#4A148C</color>
+    <color name="theme_amber">#D48800</color>
+
+    <!-- UI Backgrounds -->
+    <color name="bg_settings">#0F141C</color>
+    <color name="card_bg">#1A2230</color>
+    <color name="card_stroke">#2E3A50</color>
+    <color name="text_primary">#F0F4F8</color>
+    <color name="text_secondary">#94A3B8</color>
+</resources>

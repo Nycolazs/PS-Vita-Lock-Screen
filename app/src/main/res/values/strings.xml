@@ -1,0 +1,70 @@
+<resources>
+    <string name="app_name">PS Vita Lock Screen</string>
+    <string name="settings_title">PS Vita Lock Screen Settings</string>
+    <string name="service_notification_title">PS Vita Lock Screen Active</string>
+    <string name="service_notification_text">Monitoring screen state for PS Vita lock screen</string>
+
+    <!-- General Section -->
+    <string name="section_general">General</string>
+    <string name="enable_lockscreen">Enable Lock Screen</string>
+    <string name="enable_lockscreen_desc">Show PS Vita start screen when turning on the device</string>
+    <string name="btn_test_lockscreen">Test Lock Screen (Preview)</string>
+    <string name="tip_samsung_lock">Tip: To bypass the Samsung swipe screen, set Screen Lock type to None in Android Settings &gt; Lock screen.</string>
+
+    <!-- Card Sheet Size ("Quadrado") Section -->
+    <string name="section_card_size">Card Sheet Size ("Quadrado")</string>
+    <string name="card_size_desc">Customize the size of the floating PS Vita peelable card</string>
+    <string name="card_size_format">Card Size: %d%%</string>
+    <string name="preset_compact">Compact (75%)</string>
+    <string name="preset_balanced">Balanced (85%)</string>
+    <string name="preset_large">Large (92%)</string>
+    <string name="preset_fullscreen">Full Screen (100%)</string>
+
+    <!-- Wallpapers & Photos -->
+    <string name="section_wallpaper">Wallpapers (Front Card &amp; Revealed Back)</string>
+    <string name="front_wallpaper_title">Front Card Photo (Peelable Sheet)</string>
+    <string name="back_wallpaper_title">Revealed Photo (Behind the Peel)</string>
+    <string name="theme_black">Onyx Black (Authentic PS Vita)</string>
+    <string name="theme_blue">Crystal Blue Waves</string>
+    <string name="theme_red">Cosmic Red Waves</string>
+    <string name="theme_green">Emerald Green Waves</string>
+    <string name="theme_purple">Neon Purple Waves</string>
+    <string name="theme_amber">Sunset Amber Waves</string>
+    <string name="btn_pick_front">Choose Custom Front Image</string>
+    <string name="btn_pick_back">Choose Custom Revealed Image</string>
+    <string name="enable_floating_particles">Enable PS Vita Floating Particles</string>
+
+    <!-- Clock & Date Section -->
+    <string name="section_clock">Clock, Date &amp; Camera</string>
+    <string name="show_clock">Show Large Clock</string>
+    <string name="show_date">Show Date above Clock</string>
+    <string name="show_camera_icon">Show Camera Shortcut Icon</string>
+    <string name="show_top_bar_time">Show Top Bar Time</string>
+    <string name="clock_24h">24-Hour Format</string>
+    <string name="clock_position">Clock Position</string>
+    <string name="clock_pos_bottom_left">Bottom-Left (Authentic PS Vita)</string>
+    <string name="clock_pos_top_left">Top-Left</string>
+    <string name="clock_pos_bottom_right">Bottom-Right</string>
+
+    <!-- Status Bar / Info Bar Customization -->
+    <string name="section_info_bar">Status Bar (Info Bar)</string>
+    <string name="carrier_text">Carrier / Operator Name</string>
+    <string name="show_wifi">Show Wi-Fi Icon</string>
+    <string name="show_wifi_desc">Display authentic PS Vita Wi-Fi wave icon on top left</string>
+    <string name="show_bluetooth">Show Bluetooth Icon</string>
+    <string name="show_bluetooth_desc">Display authentic PS Vita Bluetooth rune icon on top left</string>
+    <string name="show_battery_icon">Show Green Battery Icon</string>
+    <string name="show_battery_desc">Display authentic PS Vita green battery capsule on top right</string>
+    <string name="show_battery_pct">Show Battery Percentage</string>
+    <string name="show_carrier">Show Carrier Name</string>
+    <string name="show_carrier_desc">Display operator name (e.g. PlayStation)</string>
+    <string name="show_signal">Show Mobile Signal Bars</string>
+    <string name="show_notifications">Show PS Vita Notification Dot</string>
+
+    <!-- Effects & Haptics Section -->
+    <string name="section_effects">Sound &amp; Haptics</string>
+    <string name="sound_effects">Peel Sound Effects</string>
+    <string name="sound_effects_desc">Play realistic adhesive peel and unlock sounds</string>
+    <string name="haptic_feedback">Haptic Vibration</string>
+    <string name="haptic_feedback_desc">Tactile vibration when peeling the film</string>
+</resources>

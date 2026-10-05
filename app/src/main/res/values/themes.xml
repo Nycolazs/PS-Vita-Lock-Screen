@@ -1,0 +1,31 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.VitaLock" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/vita_blue_primary</item>
+        <item name="colorPrimaryVariant">@color/vita_blue_dark</item>
+        <item name="colorOnPrimary">@color/vita_white</item>
+        <item name="android:statusBarColor">@color/vita_blue_dark</item>
+        <item name="android:windowBackground">@color/bg_settings</item>
+    </style>
+
+    <!-- Fullscreen Lockscreen Theme: Edge to edge past all cutouts -->
+    <style name="Theme.VitaLock.Fullscreen" parent="Theme.VitaLock">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="p">shortEdges</item>
+        <item name="android:windowTranslucentStatus">true</item>
+        <item name="android:windowTranslucentNavigation">true</item>
+        <item name="android:fitsSystemWindows">false</item>
+    </style>
+
+    <!-- Settings Theme -->
+    <style name="Theme.VitaLock.Settings" parent="Theme.VitaLock">
+        <item name="android:windowBackground">@color/bg_settings</item>
+        <item name="android:statusBarColor">@color/bg_settings</item>
+    </style>
+</resources>
