@@ -28,13 +28,143 @@ object PagePeelMath {
     )
 
     data class PeelState(
-        val corner: PeelPoint,
-        val touch: PeelPoint,
-        val dragDistance: Float,
-        val foldLine: FoldLine?,
-        val isThresholdMet: Boolean,
-        val curlRadius: Float
+        val corner: PeelPoint = PeelPoint(0f, 0f),
+        val touch: PeelPoint = PeelPoint(0f, 0f),
+        val dragDistance: Float = 0f,
+        val foldLine: FoldLine? = null,
+        val isThresholdMet: Boolean = false,
+        val curlRadius: Float = 60f
     )
+
+    /**
+     * High-performance, zero-allocation peel calculation engine for 120fps/60fps rendering.
+     * Reuses internal primitive fields to eliminate garbage collection pressure during animations.
+     */
+    class FastPeelEngine {
+        var hasFoldLine: Boolean = false
+        var p1X: Float = 0f
+        var p1Y: Float = 0f
+        var p2X: Float = 0f
+        var p2Y: Float = 0f
+        var normalX: Float = 0f
+        var normalY: Float = 0f
+        var midX: Float = 0f
+        var midY: Float = 0f
+        var dragDistance: Float = 0f
+        var isThresholdMet: Boolean = false
+
+        val reflectionMatrixValues = FloatArray(9)
+
+        fun calculate(
+            left: Float, top: Float, right: Float, bottom: Float,
+            touchX: Float, touchY: Float
+        ) {
+            val cornerX = right
+            val cornerY = top
+            val width = right - left
+            val height = bottom - top
+
+            val clampedX = touchX.coerceIn(left - width * 0.5f, right)
+            val clampedY = touchY.coerceIn(top, bottom + height * 0.5f)
+
+            val vx = clampedX - cornerX
+            val vy = clampedY - cornerY
+            val dist = sqrt(vx * vx + vy * vy)
+            dragDistance = dist
+
+            if (dist < 1f) {
+                hasFoldLine = false
+                isThresholdMet = false
+                return
+            }
+
+            val nx = vx / dist
+            val ny = vy / dist
+            normalX = nx
+            normalY = ny
+
+            val mx = (cornerX + clampedX) * 0.5f
+            val my = (cornerY + clampedY) * 0.5f
+            midX = mx
+            midY = my
+
+            val k = nx * mx + ny * my
+
+            var count = 0
+
+            fun addPoint(px: Float, py: Float) {
+                if (count == 0) {
+                    p1X = px
+                    p1Y = py
+                    count = 1
+                } else if (count == 1) {
+                    val dpx = px - p1X
+                    val dpy = py - p1Y
+                    if (dpx * dpx + dpy * dpy >= 4f) {
+                        p2X = px
+                        p2Y = py
+                        count = 2
+                    }
+                }
+            }
+
+            // 1. Top border: y = top => nx * x = k - ny * top
+            if (nx != 0f) {
+                val xTop = (k - ny * top) / nx
+                if (xTop in left..right) {
+                    addPoint(xTop, top)
+                }
+            }
+
+            // 2. Right border: x = right => ny * y = k - nx * right
+            if (ny != 0f) {
+                val yRight = (k - nx * right) / ny
+                if (yRight in top..bottom) {
+                    addPoint(right, yRight)
+                }
+            }
+
+            // 3. Bottom border: y = bottom => nx * x = k - ny * bottom
+            if (nx != 0f && count < 2) {
+                val xBottom = (k - ny * bottom) / nx
+                if (xBottom in left..right) {
+                    addPoint(xBottom, bottom)
+                }
+            }
+
+            // 4. Left border: x = left => ny * y = k - nx * left
+            if (ny != 0f && count < 2) {
+                val yLeft = (k - nx * left) / ny
+                if (yLeft in top..bottom) {
+                    addPoint(left, yLeft)
+                }
+            }
+
+            hasFoldLine = (count >= 2)
+
+            val cardDiagonal = sqrt(width * width + height * height)
+            isThresholdMet = dist > (cardDiagonal * 0.42f) || clampedX < (left + width * 0.40f)
+        }
+
+        fun updateReflectionMatrix() {
+            val k = normalX * midX + normalY * midY
+            val nx2 = normalX * normalX
+            val ny2 = normalY * normalY
+            val nxny2 = 2f * normalX * normalY
+
+            reflectionMatrixValues[0] = 1f - 2f * nx2
+            reflectionMatrixValues[1] = -nxny2
+            reflectionMatrixValues[2] = 2f * normalX * k
+
+            reflectionMatrixValues[3] = -nxny2
+            reflectionMatrixValues[4] = 1f - 2f * ny2
+            reflectionMatrixValues[5] = 2f * normalY * k
+
+            reflectionMatrixValues[6] = 0f
+            reflectionMatrixValues[7] = 0f
+            reflectionMatrixValues[8] = 1f
+        }
+    }
 
     /**
      * Calculates the peel for a given bounding rectangle (cardRect)

@@ -57,6 +57,34 @@ class VitaInfoBarView @JvmOverloads constructor(
         strokeWidth = 1.5f
     }
 
+    private var barBgShader: LinearGradient? = null
+    private var lastShaderH: Float = 0f
+    private val sharedRectF = RectF()
+    private val btPath = Path()
+    private val boltPath = Path()
+    private val boltShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#90000000")
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val boltFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
+    }
+    private val notifCenterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+
+    private var cachedTopBarTime: String = ""
+    private var lastTopBarMinute: Long = -1L
+
+    private fun updateTopBarTime(force: Boolean = false) {
+        val currentMin = System.currentTimeMillis() / 60000L
+        if (!force && currentMin == lastTopBarMinute && cachedTopBarTime.isNotEmpty()) return
+        lastTopBarMinute = currentMin
+        val now = Date()
+        val pattern = if (prefs.is24HourFormat) "HH:mm" else "h:mm a"
+        cachedTopBarTime = SimpleDateFormat(pattern, Locale.US).format(now)
+    }
+
     private var batteryLevel: Int = 100
     private var isCharging: Boolean = false
     private var isWifiConnected: Boolean = false
@@ -228,6 +256,8 @@ class VitaInfoBarView @JvmOverloads constructor(
 
     private var cardLeft: Float = -1f
     private var cardRight: Float = -1f
+    private var cutoutLeft: Float = 0f
+    private var cutoutRight: Float = 0f
 
     fun setCardBounds(left: Float, right: Float) {
         cardLeft = left
@@ -235,8 +265,14 @@ class VitaInfoBarView @JvmOverloads constructor(
         invalidate()
     }
 
+    fun setCutoutInsets(left: Float, right: Float) {
+        cutoutLeft = left
+        cutoutRight = right
+        invalidate()
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (42 * resources.displayMetrics.density).toInt()
+        val desiredHeight = (40 * resources.displayMetrics.density).toInt()
         val h = resolveSize(desiredHeight, heightMeasureSpec)
         super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
     }
@@ -246,17 +282,23 @@ class VitaInfoBarView @JvmOverloads constructor(
         val w = width.toFloat()
         val h = height.toFloat()
         val density = resources.displayMetrics.density
-        val paddingLeft = if (cardLeft > 0f) maxOf(cardLeft + 10f * density, 24f * density) else 24f * density
-        val paddingRight = if (cardRight > 0f && cardRight < w) maxOf((w - cardRight) + 10f * density, 24f * density) else 24f * density
+        val minPadLeft = maxOf(20f * density, cutoutLeft + 10f * density)
+        val minPadRight = maxOf(20f * density, cutoutRight + 10f * density)
+        val paddingLeft = if (cardLeft > 0f) maxOf(cardLeft + 8f * density, minPadLeft) else minPadLeft
+        val paddingRight = if (cardRight > 0f && cardRight < w) maxOf((w - cardRight) + 8f * density, minPadRight) else minPadRight
         val centerY = h / 2f
 
         // Draw sleek glossy bar background & bottom divider line
-        barBgPaint.shader = LinearGradient(
-            0f, 0f, 0f, h,
-            Color.parseColor("#1E2128"),
-            Color.parseColor("#0C0E12"),
-            Shader.TileMode.CLAMP
-        )
+        if (barBgShader == null || lastShaderH != h) {
+            lastShaderH = h
+            barBgShader = LinearGradient(
+                0f, 0f, 0f, h,
+                Color.parseColor("#1E2128"),
+                Color.parseColor("#0C0E12"),
+                Shader.TileMode.CLAMP
+            )
+            barBgPaint.shader = barBgShader
+        }
         canvas.drawRect(0f, 0f, w, h, barBgPaint)
         canvas.drawLine(0f, h - 1f, w, h - 1f, dividerPaint)
 
@@ -281,10 +323,8 @@ class VitaInfoBarView @JvmOverloads constructor(
                 val barH = maxBarHeight * ((i + 1) / 4f)
                 val bx = currentX + i * (barWidth + barGap)
                 val by = centerY + maxBarHeight / 2f - barH
-                canvas.drawRoundRect(
-                    RectF(bx, by, bx + barWidth, centerY + maxBarHeight / 2f),
-                    1f * density, 1f * density, fillPaint
-                )
+                sharedRectF.set(bx, by, bx + barWidth, centerY + maxBarHeight / 2f)
+                canvas.drawRoundRect(sharedRectF, 1f * density, 1f * density, fillPaint)
             }
             currentX += 4 * (barWidth + barGap) + 14f * density
         }
@@ -305,16 +345,16 @@ class VitaInfoBarView @JvmOverloads constructor(
             iconPaint.strokeCap = Paint.Cap.ROUND
 
             val r1 = 4.6f * density
-            val rect1 = RectF(centerX - r1, dotY - r1, centerX + r1, dotY + r1)
-            canvas.drawArc(rect1, 225f, 90f, false, iconPaint)
+            sharedRectF.set(centerX - r1, dotY - r1, centerX + r1, dotY + r1)
+            canvas.drawArc(sharedRectF, 225f, 90f, false, iconPaint)
 
             val r2 = 8.2f * density
-            val rect2 = RectF(centerX - r2, dotY - r2, centerX + r2, dotY + r2)
-            canvas.drawArc(rect2, 225f, 90f, false, iconPaint)
+            sharedRectF.set(centerX - r2, dotY - r2, centerX + r2, dotY + r2)
+            canvas.drawArc(sharedRectF, 225f, 90f, false, iconPaint)
 
             val r3 = 11.8f * density
-            val rect3 = RectF(centerX - r3, dotY - r3, centerX + r3, dotY + r3)
-            canvas.drawArc(rect3, 225f, 90f, false, iconPaint)
+            sharedRectF.set(centerX - r3, dotY - r3, centerX + r3, dotY + r3)
+            canvas.drawArc(sharedRectF, 225f, 90f, false, iconPaint)
 
             currentX += wifiW + 14f * density
         }
@@ -332,14 +372,13 @@ class VitaInfoBarView @JvmOverloads constructor(
             val tailTopY = centerY - halfH * 0.5f
             val tailBottomY = centerY + halfH * 0.5f
 
-            val btPath = Path().apply {
-                moveTo(leftX, tailBottomY)
-                lineTo(rightX, upperPeakY)
-                lineTo(spineX, topY)
-                lineTo(spineX, bottomY)
-                lineTo(rightX, lowerPeakY)
-                lineTo(leftX, tailTopY)
-            }
+            btPath.reset()
+            btPath.moveTo(leftX, tailBottomY)
+            btPath.lineTo(rightX, upperPeakY)
+            btPath.lineTo(spineX, topY)
+            btPath.lineTo(spineX, bottomY)
+            btPath.lineTo(rightX, lowerPeakY)
+            btPath.lineTo(leftX, tailTopY)
 
             iconPaint.color = Color.WHITE
             iconPaint.strokeWidth = 1.9f * density
@@ -353,7 +392,6 @@ class VitaInfoBarView @JvmOverloads constructor(
         // --- Center: PS Vita Notification Dot ---
         if (prefs.showNotificationDot) {
             canvas.drawCircle(w / 2f, centerY, 7f * density, notifPaint)
-            val notifCenterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
             canvas.drawCircle(w / 2f, centerY, 2.5f * density, notifCenterPaint)
         }
 
@@ -370,57 +408,48 @@ class VitaInfoBarView @JvmOverloads constructor(
             iconPaint.strokeWidth = 1.9f * density
             iconPaint.strokeCap = Paint.Cap.ROUND
             iconPaint.strokeJoin = Paint.Join.ROUND
-            val battRect = RectF(battX, battY, battX + battW, battY + battH)
-            canvas.drawRoundRect(battRect, 3.5f * density, 3.5f * density, iconPaint)
+            sharedRectF.set(battX, battY, battX + battW, battY + battH)
+            canvas.drawRoundRect(sharedRectF, 3.5f * density, 3.5f * density, iconPaint)
 
             // Positive terminal nipple
             fillPaint.color = Color.WHITE
             val nippleW = 2.4f * density
             val nippleH = 6f * density
-            val nippleRect = RectF(
+            sharedRectF.set(
                 battX + battW,
                 centerY - nippleH / 2f,
                 battX + battW + nippleW,
                 centerY + nippleH / 2f
             )
-            canvas.drawRoundRect(nippleRect, 1.2f * density, 1.2f * density, fillPaint)
+            canvas.drawRoundRect(sharedRectF, 1.2f * density, 1.2f * density, fillPaint)
 
             // Green battery fill (Authentic PS Vita green #3CD070)
             val fillPad = 2.2f * density
             val maxFillW = battW - (fillPad * 2)
             val currentFillW = (maxFillW * (batteryLevel / 100f)).coerceIn(0f, maxFillW)
             fillPaint.color = if (batteryLevel <= 15) Color.parseColor("#E03030") else Color.parseColor("#3CD070")
-            val fillRect = RectF(
+            sharedRectF.set(
                 battX + fillPad,
                 battY + fillPad,
                 battX + fillPad + currentFillW,
                 battY + battH - fillPad
             )
-            canvas.drawRoundRect(fillRect, 2f * density, 2f * density, fillPaint)
+            canvas.drawRoundRect(sharedRectF, 2f * density, 2f * density, fillPaint)
 
             // Charging Lightning Bolt (Authentic PS Vita charging indicator)
             if (isCharging) {
                 val bcX = battX + battW / 2f
                 val bcY = centerY
-                val boltPath = Path().apply {
-                    moveTo(bcX + 1.2f * density, bcY - 5.2f * density)
-                    lineTo(bcX - 2.8f * density, bcY + 0.6f * density)
-                    lineTo(bcX - 0.2f * density, bcY + 0.6f * density)
-                    lineTo(bcX - 1.2f * density, bcY + 5.2f * density)
-                    lineTo(bcX + 2.8f * density, bcY - 0.6f * density)
-                    lineTo(bcX + 0.2f * density, bcY - 0.6f * density)
-                    close()
-                }
-                val boltShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#90000000")
-                    style = Paint.Style.STROKE
-                    strokeWidth = 1.4f * density
-                    strokeJoin = Paint.Join.ROUND
-                }
-                val boltFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.WHITE
-                    style = Paint.Style.FILL
-                }
+                boltPath.reset()
+                boltPath.moveTo(bcX + 1.2f * density, bcY - 5.2f * density)
+                boltPath.lineTo(bcX - 2.8f * density, bcY + 0.6f * density)
+                boltPath.lineTo(bcX - 0.2f * density, bcY + 0.6f * density)
+                boltPath.lineTo(bcX - 1.2f * density, bcY + 5.2f * density)
+                boltPath.lineTo(bcX + 2.8f * density, bcY - 0.6f * density)
+                boltPath.lineTo(bcX + 0.2f * density, bcY - 0.6f * density)
+                boltPath.close()
+
+                boltShadowPaint.strokeWidth = 1.4f * density
                 canvas.drawPath(boltPath, boltShadowPaint)
                 canvas.drawPath(boltPath, boltFillPaint)
             }
@@ -439,13 +468,11 @@ class VitaInfoBarView @JvmOverloads constructor(
 
         // Top bar time: e.g. "7:53 PM" (Authentic Vita right top corner)
         if (prefs.showTopBarTime) {
-            val now = Date()
-            val pattern = if (prefs.is24HourFormat) "HH:mm" else "h:mm a"
-            val timeText = SimpleDateFormat(pattern, Locale.US).format(now)
+            updateTopBarTime()
             textPaint.textAlign = Paint.Align.RIGHT
             textPaint.textSize = h * 0.42f
             textPaint.color = Color.WHITE
-            canvas.drawText(timeText, rightX, centerY + textPaint.textSize * 0.35f, textPaint)
+            canvas.drawText(cachedTopBarTime, rightX, centerY + textPaint.textSize * 0.35f, textPaint)
         }
     }
 }

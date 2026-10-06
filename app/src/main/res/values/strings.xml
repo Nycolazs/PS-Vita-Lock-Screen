@@ -35,7 +35,7 @@
     <string name="enable_floating_particles">Enable PS Vita Floating Particles</string>
 
     <!-- Clock & Date Section -->
-    <string name="section_clock">Clock, Date &amp; Camera</string>
+    <string name="section_clock">Clock &amp; Date</string>
     <string name="show_clock">Show Large Clock</string>
     <string name="show_date">Show Date above Clock</string>
     <string name="show_camera_icon">Show Camera Shortcut Icon</string>
@@ -61,10 +61,19 @@
     <string name="show_signal">Show Mobile Signal Bars</string>
     <string name="show_notifications">Show PS Vita Notification Dot</string>
 
-    <!-- Effects & Haptics Section -->
     <string name="section_effects">Sound &amp; Haptics</string>
     <string name="sound_effects">Peel Sound Effects</string>
     <string name="sound_effects_desc">Play realistic adhesive peel and unlock sounds</string>
     <string name="haptic_feedback">Haptic Vibration</string>
     <string name="haptic_feedback_desc">Tactile vibration when peeling the film</string>
+
+    <!-- Preview & Permissions -->
+    <string name="section_preview">Pré-visualização dos Planos de Fundo</string>
+    <string name="preview_desc">Veja como fica a combinação dos fundos e o cartão. Toque ou arraste para interagir!</string>
+    <string name="overlay_perm_title">Permissão de Sobreposição Necessária</string>
+    <string name="overlay_perm_desc">Para que o PS Vita Lock Screen apareça na tela de bloqueio e após reiniciar o celular, ative \"Aparecer sobre outros apps\".</string>
+    <string name="btn_grant_permission">Conceder Permissão</string>
+    <string name="preview_front_label">Frente: %s</string>
+    <string name="preview_back_label">Fundo: %s</string>
+    <string name="theme_custom">Personalizado (Galeria)</string>
 </resources>

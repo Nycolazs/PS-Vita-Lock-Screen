@@ -2,9 +2,11 @@ package com.psvita.lockscreen
 
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.view.View
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,7 +36,8 @@ class SettingsActivity : AppCompatActivity() {
                 prefs.frontCustomWallpaperUri = uri.toString()
                 prefs.frontWallpaperPreset = "custom"
                 binding.radioGroupFront.clearCheck()
-                Toast.makeText(this, "Custom front card image set!", Toast.LENGTH_SHORT).show()
+                refreshPreview()
+                Toast.makeText(this, "Imagem personalizada da frente definida!", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -54,14 +57,16 @@ class SettingsActivity : AppCompatActivity() {
                 prefs.backCustomWallpaperUri = uri.toString()
                 prefs.backWallpaperPreset = "custom"
                 binding.radioGroupBack.clearCheck()
-                Toast.makeText(this, "Custom revealed background image set!", Toast.LENGTH_SHORT).show()
+                refreshPreview()
+                Toast.makeText(this, "Imagem personalizada revelada definida!", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+
+        configureDisplayRefreshRate()
 
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -72,8 +77,89 @@ class SettingsActivity : AppCompatActivity() {
             LockScreenService.start(this)
         }
 
+        binding.livePreviewView.isPreviewMode = true
+
         initViews()
         bindEvents()
+        checkOverlayPermission()
+        refreshPreview()
+    }
+
+    private fun configureDisplayRefreshRate() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val d = display
+            val modes = d?.supportedModes
+            if (!modes.isNullOrEmpty()) {
+                val maxMode = modes.maxByOrNull { it.refreshRate }
+                if (maxMode != null) {
+                    val lp = window.attributes
+                    lp.preferredDisplayModeId = maxMode.modeId
+                    window.attributes = lp
+                }
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val lp = window.attributes
+            lp.preferredRefreshRate = 120f
+            window.attributes = lp
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        checkOverlayPermission()
+        refreshPreview()
+    }
+
+    private fun checkOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val hasPermission = Settings.canDrawOverlays(this)
+            binding.cardOverlayPermission.visibility = if (hasPermission) View.GONE else View.VISIBLE
+            binding.btnGrantOverlay.setOnClickListener {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            }
+        } else {
+            binding.cardOverlayPermission.visibility = View.GONE
+        }
+    }
+
+    private fun refreshPreview() {
+        binding.livePreviewView.reloadSettings()
+        updatePreviewLabels()
+    }
+
+    private fun updatePreviewLabels() {
+        val frontName = if (prefs.frontCustomWallpaperUri != null) {
+            "Personalizado (Foto)"
+        } else {
+            when (prefs.frontWallpaperPreset) {
+                "blue" -> "Azul Cristal"
+                "red" -> "Vermelho Cósmico"
+                "green" -> "Verde Esmeralda"
+                "purple" -> "Roxo Neon"
+                "amber" -> "Âmbar Sunset"
+                else -> "Preto Onyx"
+            }
+        }
+
+        val backName = if (prefs.backCustomWallpaperUri != null) {
+            "Personalizado (Foto)"
+        } else {
+            when (prefs.backWallpaperPreset) {
+                "red" -> "Vermelho Cósmico"
+                "green" -> "Verde Esmeralda"
+                "purple" -> "Roxo Neon"
+                "amber" -> "Âmbar Sunset"
+                "black" -> "Preto Onyx"
+                else -> "Azul Cristal"
+            }
+        }
+
+        binding.tvPreviewFrontInfo.text = "Frente: $frontName"
+        binding.tvPreviewBackInfo.text = "Fundo: $backName"
     }
 
     private fun initViews() {
@@ -86,25 +172,36 @@ class SettingsActivity : AppCompatActivity() {
         binding.tvCardSizeValue.text = "$cardSize%"
 
         // Front Wallpaper radio
-        when (prefs.frontWallpaperPreset) {
-            "blue" -> binding.radioFrontBlue.isChecked = true
-            "red" -> binding.radioFrontRed.isChecked = true
-            "black" -> binding.radioFrontBlack.isChecked = true
-            else -> binding.radioGroupFront.clearCheck()
+        if (prefs.frontCustomWallpaperUri == null) {
+            when (prefs.frontWallpaperPreset) {
+                "blue" -> binding.radioFrontBlue.isChecked = true
+                "red" -> binding.radioFrontRed.isChecked = true
+                "green" -> binding.radioFrontGreen.isChecked = true
+                "purple" -> binding.radioFrontPurple.isChecked = true
+                "amber" -> binding.radioFrontAmber.isChecked = true
+                else -> binding.radioFrontBlack.isChecked = true
+            }
+        } else {
+            binding.radioGroupFront.clearCheck()
         }
 
         // Back Wallpaper radio
-        when (prefs.backWallpaperPreset) {
-            "red" -> binding.radioBackRed.isChecked = true
-            "green" -> binding.radioBackGreen.isChecked = true
-            "blue" -> binding.radioBackBlue.isChecked = true
-            else -> binding.radioGroupBack.clearCheck()
+        if (prefs.backCustomWallpaperUri == null) {
+            when (prefs.backWallpaperPreset) {
+                "red" -> binding.radioBackRed.isChecked = true
+                "green" -> binding.radioBackGreen.isChecked = true
+                "purple" -> binding.radioBackPurple.isChecked = true
+                "amber" -> binding.radioBackAmber.isChecked = true
+                "black" -> binding.radioBackBlack.isChecked = true
+                else -> binding.radioBackBlue.isChecked = true
+            }
+        } else {
+            binding.radioGroupBack.clearCheck()
         }
 
         // Clock, Date & Camera toggles
         binding.switchShowDate.isChecked = prefs.showDate
         binding.switchShowClock.isChecked = prefs.showClock
-        binding.switchCameraIcon.isChecked = prefs.showCameraIcon
         binding.switchTopBarTime.isChecked = prefs.showTopBarTime
         binding.switch24h.isChecked = prefs.is24HourFormat
 
@@ -138,7 +235,7 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        // Preview button
+        // Fullscreen Preview button
         binding.btnPreview.setOnClickListener {
             val intent = Intent(this, VitaLockActivity::class.java)
             startActivity(intent)
@@ -151,6 +248,7 @@ class SettingsActivity : AppCompatActivity() {
                 binding.tvCardSizeValue.text = "$size%"
                 if (fromUser) {
                     prefs.cardSizePercent = size
+                    refreshPreview()
                 }
             }
 
@@ -163,30 +261,40 @@ class SettingsActivity : AppCompatActivity() {
             prefs.cardSizePercent = 75
             binding.seekBarCardSize.progress = 5
             binding.tvCardSizeValue.text = "75%"
+            refreshPreview()
         }
         binding.btnSizeBalanced.setOnClickListener {
             prefs.cardSizePercent = 85
             binding.seekBarCardSize.progress = 15
             binding.tvCardSizeValue.text = "85%"
+            refreshPreview()
         }
         binding.btnSizeLarge.setOnClickListener {
             prefs.cardSizePercent = 92
             binding.seekBarCardSize.progress = 22
             binding.tvCardSizeValue.text = "92%"
+            refreshPreview()
         }
         binding.btnSizeFullscreen.setOnClickListener {
             prefs.cardSizePercent = 100
             binding.seekBarCardSize.progress = 30
             binding.tvCardSizeValue.text = "100%"
+            refreshPreview()
         }
 
         // Front Wallpaper selection
         binding.radioGroupFront.setOnCheckedChangeListener { _, checkedId ->
-            prefs.frontCustomWallpaperUri = null
-            prefs.frontWallpaperPreset = when (checkedId) {
-                R.id.radioFrontBlue -> "blue"
-                R.id.radioFrontRed -> "red"
-                else -> "black"
+            if (checkedId != -1) {
+                prefs.frontCustomWallpaperUri = null
+                prefs.frontWallpaperPreset = when (checkedId) {
+                    binding.radioFrontBlue.id -> "blue"
+                    binding.radioFrontRed.id -> "red"
+                    binding.radioFrontGreen.id -> "green"
+                    binding.radioFrontPurple.id -> "purple"
+                    binding.radioFrontAmber.id -> "amber"
+                    else -> "black"
+                }
+                refreshPreview()
             }
         }
 
@@ -200,11 +308,17 @@ class SettingsActivity : AppCompatActivity() {
 
         // Back Wallpaper selection
         binding.radioGroupBack.setOnCheckedChangeListener { _, checkedId ->
-            prefs.backCustomWallpaperUri = null
-            prefs.backWallpaperPreset = when (checkedId) {
-                R.id.radioBackRed -> "red"
-                R.id.radioBackGreen -> "green"
-                else -> "blue"
+            if (checkedId != -1) {
+                prefs.backCustomWallpaperUri = null
+                prefs.backWallpaperPreset = when (checkedId) {
+                    binding.radioBackRed.id -> "red"
+                    binding.radioBackGreen.id -> "green"
+                    binding.radioBackPurple.id -> "purple"
+                    binding.radioBackAmber.id -> "amber"
+                    binding.radioBackBlack.id -> "black"
+                    else -> "blue"
+                }
+                refreshPreview()
             }
         }
 
@@ -219,27 +333,29 @@ class SettingsActivity : AppCompatActivity() {
         // Clock, Date & Camera toggles
         binding.switchShowDate.setOnCheckedChangeListener { _, isChecked ->
             prefs.showDate = isChecked
+            refreshPreview()
         }
         binding.switchShowClock.setOnCheckedChangeListener { _, isChecked ->
             prefs.showClock = isChecked
-        }
-        binding.switchCameraIcon.setOnCheckedChangeListener { _, isChecked ->
-            prefs.showCameraIcon = isChecked
+            refreshPreview()
         }
         binding.switchTopBarTime.setOnCheckedChangeListener { _, isChecked ->
             prefs.showTopBarTime = isChecked
+            refreshPreview()
         }
         binding.switch24h.setOnCheckedChangeListener { _, isChecked ->
             prefs.is24HourFormat = isChecked
+            refreshPreview()
         }
 
         // Clock position
         binding.radioGroupClockPos.setOnCheckedChangeListener { _, checkedId ->
             prefs.clockPosition = when (checkedId) {
-                R.id.radioPosTopLeft -> ClockPosition.TOP_LEFT
-                R.id.radioPosBottomRight -> ClockPosition.BOTTOM_RIGHT
+                binding.radioPosTopLeft.id -> ClockPosition.TOP_LEFT
+                binding.radioPosBottomRight.id -> ClockPosition.BOTTOM_RIGHT
                 else -> ClockPosition.BOTTOM_LEFT
             }
+            refreshPreview()
         }
 
         // Sound switch
@@ -255,21 +371,27 @@ class SettingsActivity : AppCompatActivity() {
         // Status Bar (Info Bar) switches
         binding.switchShowWifi.setOnCheckedChangeListener { _, isChecked ->
             prefs.showWifiIcon = isChecked
+            refreshPreview()
         }
         binding.switchShowBluetooth.setOnCheckedChangeListener { _, isChecked ->
             prefs.showBluetoothIcon = isChecked
+            refreshPreview()
         }
         binding.switchShowBattery.setOnCheckedChangeListener { _, isChecked ->
             prefs.showBatteryIcon = isChecked
+            refreshPreview()
         }
         binding.switchShowBatteryPct.setOnCheckedChangeListener { _, isChecked ->
             prefs.showBatteryPercentage = isChecked
+            refreshPreview()
         }
         binding.switchShowCarrier.setOnCheckedChangeListener { _, isChecked ->
             prefs.showCarrierText = isChecked
+            refreshPreview()
         }
         binding.switchShowSignal.setOnCheckedChangeListener { _, isChecked ->
             prefs.showSignalIcon = isChecked
+            refreshPreview()
         }
     }
 }

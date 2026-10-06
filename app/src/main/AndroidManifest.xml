@@ -5,6 +5,7 @@
     <!-- Permissions for Lock Screen and Service -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -23,27 +24,23 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.VitaLock">
 
-        <!-- PS Vita Lock Screen Activity (Fullscreen Landscape) -->
+        <!-- PS Vita Lock Screen Activity (Fullscreen Landscape, separate task affinity) -->
         <activity
             android:name=".VitaLockActivity"
-            android:exported="true"
-            android:screenOrientation="sensorLandscape"
+            android:exported="false"
+            android:taskAffinity="com.psvita.lockscreen.lock"
             android:showOnLockScreen="true"
             android:showWhenLocked="true"
             android:inheritShowWhenLocked="true"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.VitaLock.Fullscreen">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-            </intent-filter>
-        </activity>
+            android:directBootAware="true"
+            android:theme="@style/Theme.VitaLock.Fullscreen" />
 
-        <!-- Settings and Theme Customization Activity -->
+        <!-- Settings and Theme Customization Activity (Default App Entrypoint) -->
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
-            android:screenOrientation="sensorLandscape"
             android:windowSoftInputMode="stateHidden"
             android:theme="@style/Theme.VitaLock.Settings">
             <intent-filter>
@@ -57,20 +54,27 @@
             android:name=".service.LockScreenService"
             android:enabled="true"
             android:exported="true"
+            android:directBootAware="true"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Custom lock screen manager for PS Vita start screen" />
         </service>
 
-        <!-- Boot Receiver to start service on device restart -->
+        <!-- Boot Receiver to start service and lock screen on device restart -->
         <receiver
             android:name=".receiver.BootReceiver"
             android:enabled="true"
-            android:exported="true">
-            <intent-filter>
+            android:exported="true"
+            android:directBootAware="true">
+            <intent-filter android:priority="999">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.REBOOT" />
+                <action android:name="com.psvita.lockscreen.ACTION_TRIGGER_BOOT" />
             </intent-filter>
         </receiver>
 

@@ -16,8 +16,25 @@ enum class ClockPosition(val id: Int) {
 
 class LockPreferences(context: Context) {
 
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("psvita_lock_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = run {
+        val targetContext = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            try {
+                val dps = context.createDeviceProtectedStorageContext()
+                val userManager = context.getSystemService(Context.USER_SERVICE) as? android.os.UserManager
+                if (userManager?.isUserUnlocked == true) {
+                    try {
+                        dps.moveSharedPreferencesFrom(context, "psvita_lock_prefs")
+                    } catch (_: Exception) {}
+                }
+                dps
+            } catch (_: Exception) {
+                context
+            }
+        } else {
+            context
+        }
+        targetContext.getSharedPreferences("psvita_lock_prefs", Context.MODE_PRIVATE)
+    }
 
     var isLockscreenEnabled: Boolean
         get() = prefs.getBoolean(KEY_LOCKSCREEN_ENABLED, true)
@@ -129,8 +146,8 @@ class LockPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_SHOW_DATE, value).apply()
 
     var showCameraIcon: Boolean
-        get() = prefs.getBoolean(KEY_SHOW_CAMERA_ICON, true)
-        set(value) = prefs.edit().putBoolean(KEY_SHOW_CAMERA_ICON, value).apply()
+        get() = false
+        set(_) {}
 
     companion object {
         private const val KEY_LOCKSCREEN_ENABLED = "lockscreen_enabled"

@@ -1,10 +1,13 @@
 package com.psvita.lockscreen.receiver
 
+import android.app.ActivityOptions
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.psvita.lockscreen.VitaLockActivity
 import com.psvita.lockscreen.data.LockPreferences
+import com.psvita.lockscreen.service.LockScreenService
 
 class ScreenReceiver : BroadcastReceiver() {
 
@@ -33,8 +36,17 @@ class ScreenReceiver : BroadcastReceiver() {
                 Intent.FLAG_ACTIVITY_NO_ANIMATION
             )
         }
+        val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ActivityOptions.makeBasic().apply {
+                pendingIntentBackgroundActivityStartMode = ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+            }.toBundle()
+        } else {
+            null
+        }
         try {
-            context.startActivity(lockIntent)
-        } catch (_: Exception) {}
+            context.startActivity(lockIntent, options)
+        } catch (_: Exception) {
+            LockScreenService.launchLockScreen(context)
+        }
     }
 }

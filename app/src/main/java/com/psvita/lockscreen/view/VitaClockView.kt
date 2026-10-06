@@ -40,25 +40,34 @@ class VitaClockView @JvmOverloads constructor(
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     }
 
-    private val cameraPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 2.5f
-    }
+    private var cachedTimeStr: String = ""
+    private var cachedAmPmStr: String = ""
+    private var cachedDateStr: String = ""
+    private var lastFormattedMinute: Long = -1L
 
-    private val cameraFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.FILL
+    fun updateTimeStrings(force: Boolean = false) {
+        val currentMinute = System.currentTimeMillis() / 60000L
+        if (!force && currentMinute == lastFormattedMinute && cachedTimeStr.isNotEmpty()) return
+        lastFormattedMinute = currentMinute
+        val now = Date()
+        val is24h = prefs.is24HourFormat
+        val timePattern = if (is24h) "HH:mm" else "h:mm"
+        cachedTimeStr = SimpleDateFormat(timePattern, Locale.US).format(now)
+        cachedAmPmStr = if (!is24h) SimpleDateFormat("a", Locale.US).format(now) else ""
+        val datePattern = "MMMM d (EEEE)"
+        cachedDateStr = SimpleDateFormat(datePattern, Locale.US).format(now)
     }
 
     private val timeReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {
+            updateTimeStrings(force = true)
             invalidate()
         }
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        updateTimeStrings(force = true)
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_TIME_TICK)
             addAction(Intent.ACTION_TIME_CHANGED)
@@ -78,25 +87,22 @@ class VitaClockView @JvmOverloads constructor(
      * Draws the clock, date, and camera icon relative to the card's bounding box.
      */
     fun drawOnCard(canvas: Canvas, cardRect: RectF) {
-        val now = Date()
-        val is24h = prefs.is24HourFormat
-        val timePattern = if (is24h) "HH:mm" else "h:mm"
-        val timeStr = SimpleDateFormat(timePattern, Locale.US).format(now)
-        val amPmStr = if (!is24h) SimpleDateFormat("a", Locale.US).format(now) else ""
-
-        // English Date Format as in reference image: "December 12 (Thursday)"
-        val datePattern = "MMMM d (EEEE)"
-        val dateStr = SimpleDateFormat(datePattern, Locale.US).format(now)
+        updateTimeStrings()
+        val timeStr = cachedTimeStr
+        val amPmStr = cachedAmPmStr
+        val dateStr = cachedDateStr
 
         val clockColor = prefs.clockColor
         timePaint.color = clockColor
         datePaint.color = clockColor
         amPmPaint.color = clockColor
-        cameraPaint.color = clockColor
-        cameraFillPaint.color = clockColor
 
+        val density = context.resources.displayMetrics.density
         val cardH = cardRect.height()
-        val timeSize = cardH * 0.28f
+        val cardW = cardRect.width()
+        val scaleBasis = minOf(cardH, cardW * 0.56f)
+
+        val timeSize = (scaleBasis * 0.27f).coerceAtLeast(16f * density)
         val amPmSize = timeSize * 0.40f
         val dateSize = timeSize * 0.28f
 
@@ -104,8 +110,9 @@ class VitaClockView @JvmOverloads constructor(
         datePaint.textSize = dateSize
         amPmPaint.textSize = amPmSize
 
-        val padX = cardRect.left + 54f
-        val bottomY = cardRect.bottom - 48f
+        val padX = cardRect.left + maxOf(18f * density, cardW * 0.045f)
+        val padRightX = cardRect.right - maxOf(18f * density, cardW * 0.045f)
+        val bottomY = cardRect.bottom - maxOf(16f * density, cardH * 0.05f)
 
         when (prefs.clockPosition) {
             ClockPosition.BOTTOM_LEFT -> {
@@ -113,7 +120,7 @@ class VitaClockView @JvmOverloads constructor(
                 datePaint.textAlign = Paint.Align.LEFT
                 amPmPaint.textAlign = Paint.Align.LEFT
 
-                val timeY = bottomY - 14f
+                val timeY = bottomY - 6f * density
                 val dateY = timeY - timeSize * 0.95f
 
                 if (prefs.showDate) {
@@ -124,15 +131,8 @@ class VitaClockView @JvmOverloads constructor(
                     canvas.drawText(timeStr, padX, timeY, timePaint)
                     if (amPmStr.isNotEmpty()) {
                         val timeWidth = timePaint.measureText(timeStr)
-                        canvas.drawText(amPmStr, padX + timeWidth + 16f, timeY, amPmPaint)
+                        canvas.drawText(amPmStr, padX + timeWidth + 8f * density, timeY, amPmPaint)
                     }
-                }
-
-                // Camera Icon in Bottom-Left corner of the card
-                if (prefs.showCameraIcon) {
-                    val camX = cardRect.left + 54f
-                    val camY = cardRect.bottom - 24f
-                    drawCameraIcon(canvas, camX, camY)
                 }
             }
             ClockPosition.TOP_LEFT -> {
@@ -140,8 +140,8 @@ class VitaClockView @JvmOverloads constructor(
                 datePaint.textAlign = Paint.Align.LEFT
                 amPmPaint.textAlign = Paint.Align.LEFT
 
-                val dateY = cardRect.top + 70f
-                val timeY = dateY + timeSize * 1.05f
+                val dateY = cardRect.top + maxOf(24f * density, cardH * 0.08f)
+                val timeY = dateY + timeSize * 1.02f
 
                 if (prefs.showDate) {
                     canvas.drawText(dateStr, padX, dateY, datePaint)
@@ -150,7 +150,7 @@ class VitaClockView @JvmOverloads constructor(
                     canvas.drawText(timeStr, padX, timeY, timePaint)
                     if (amPmStr.isNotEmpty()) {
                         val timeWidth = timePaint.measureText(timeStr)
-                        canvas.drawText(amPmStr, padX + timeWidth + 16f, timeY, amPmPaint)
+                        canvas.drawText(amPmStr, padX + timeWidth + 8f * density, timeY, amPmPaint)
                     }
                 }
             }
@@ -159,31 +159,17 @@ class VitaClockView @JvmOverloads constructor(
                 datePaint.textAlign = Paint.Align.RIGHT
                 amPmPaint.textAlign = Paint.Align.RIGHT
 
-                val rightX = cardRect.right - 54f
-                val timeY = bottomY - 14f
+                val timeY = bottomY - 6f * density
                 val dateY = timeY - timeSize * 0.95f
 
                 if (prefs.showDate) {
-                    canvas.drawText(dateStr, rightX, dateY, datePaint)
+                    canvas.drawText(dateStr, padRightX, dateY, datePaint)
                 }
                 if (prefs.showClock) {
-                    canvas.drawText(timeStr, rightX, timeY, timePaint)
+                    canvas.drawText(timeStr, padRightX, timeY, timePaint)
                 }
             }
         }
-    }
-
-    private fun drawCameraIcon(canvas: Canvas, x: Float, y: Float) {
-        val w = 34f
-        val h = 24f
-        val rect = RectF(x, y - h, x + w, y)
-        // Camera body
-        canvas.drawRoundRect(rect, 4f, 4f, cameraPaint)
-        // Camera lens
-        canvas.drawCircle(x + w / 2f, y - h / 2f, 6f, cameraPaint)
-        canvas.drawCircle(x + w / 2f, y - h / 2f, 2.5f, cameraFillPaint)
-        // Flash/shutter bump
-        canvas.drawRect(x + 6f, y - h - 3f, x + 14f, y - h, cameraFillPaint)
     }
 
     override fun onDraw(canvas: Canvas) {

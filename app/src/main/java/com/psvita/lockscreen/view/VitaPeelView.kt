@@ -15,6 +15,7 @@ import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
 import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
 import com.psvita.lockscreen.R
@@ -36,10 +37,28 @@ class VitaPeelView @JvmOverloads constructor(
         fun onUnlock()
     }
 
+    var isPreviewMode: Boolean = false
     var onUnlockListener: OnUnlockListener? = null
 
     private val prefs = LockPreferences(context)
     private val soundManager = SoundManager(context)
+
+    private val density get() = resources.displayMetrics.density
+
+    // Cutout insets
+    var cutoutLeft: Float = 0f
+        set(value) {
+            field = value
+            infoBar.setCutoutInsets(cutoutLeft, cutoutRight)
+            if (width > 0 && height > 0) updateCardGeometry(width, height)
+        }
+
+    var cutoutRight: Float = 0f
+        set(value) {
+            field = value
+            infoBar.setCutoutInsets(cutoutLeft, cutoutRight)
+            if (width > 0 && height > 0) updateCardGeometry(width, height)
+        }
 
     // Vibrator
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -53,10 +72,13 @@ class VitaPeelView @JvmOverloads constructor(
     // Touch & Animation State
     private var isDragging = false
     private var isAnimating = false
+    private var isUnlocking = false
+    private var isUnlocked = false
     private var currentTouchX = 0f
     private var currentTouchY = 0f
     private var velocityTracker: VelocityTracker? = null
-    private var lastTopRightTapTime = 0L
+    private var touchDownX = 0f
+    private var touchDownY = 0f
 
     // Idle flutter animation
     private var idleAnimator: ValueAnimator? = null
@@ -68,7 +90,9 @@ class VitaPeelView @JvmOverloads constructor(
 
     // Card geometry (Rounded rectangle sheet)
     private val cardRect = RectF()
-    private val cardCornerRadius = 28f
+    private val cardCornerRadius get() = 18f * density
+    private val shadowWidth get() = 24f * density
+    private val rollRadius get() = 14f * density
 
     // Bitmaps for Front and Back photos
     private var frontBitmap: Bitmap? = null
@@ -80,17 +104,17 @@ class VitaPeelView @JvmOverloads constructor(
     private val cardCutoutShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#40000000") // Subtle groove shadow under cutout
         style = Paint.Style.STROKE
-        strokeWidth = 2.4f * resources.displayMetrics.density
+        strokeWidth = 2.4f * density
     }
     private val cardCutoutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#70FFFFFF") // Authentic clean gray/white cutout line
         style = Paint.Style.STROKE
-        strokeWidth = 1.4f * resources.displayMetrics.density
+        strokeWidth = 1.4f * density
     }
     private val cardBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#70FFFFFF")
         style = Paint.Style.STROKE
-        strokeWidth = 1.4f * resources.displayMetrics.density
+        strokeWidth = 1.4f * density
     }
     private val cardFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#0C0D10")
@@ -120,6 +144,83 @@ class VitaPeelView @JvmOverloads constructor(
     private val particles = mutableListOf<Particle>()
     private val particlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
+    // Fast zero-allocation peel calculation engine
+    private val peelEngine = PagePeelMath.FastPeelEngine()
+
+    // Pre-allocated paths for 120fps/60fps rendering (reused across all frames)
+    private val cardPath = Path()
+    private val cornerSidePolyPath = Path()
+    private val peeledRegionPath = Path()
+    private val shadowPath = Path()
+    private val foldedFlapPath = Path()
+    private val rollPath = Path()
+    private val wavePath1 = Path()
+    private val wavePath2 = Path()
+
+    // Pre-allocated matrices and arrays
+    private val reflectionMatrix = Matrix()
+    private val shaderMatrix = Matrix()
+    private val shaderMatrixValues = FloatArray(9)
+
+    // Pre-allocated unit shaders for instant GPU matrix transformation
+    private val unitShadowShader = LinearGradient(
+        0f, 0f, 1f, 0f,
+        intArrayOf(Color.TRANSPARENT, Color.parseColor("#B0000000")),
+        floatArrayOf(0f, 1f),
+        Shader.TileMode.CLAMP
+    )
+
+    private val unitPeelBackShader = LinearGradient(
+        0f, 0f, 1f, 0f,
+        intArrayOf(
+            Color.parseColor("#646A74"),
+            Color.parseColor("#444951"),
+            Color.parseColor("#2A2D33"),
+            Color.parseColor("#1B1D21")
+        ),
+        floatArrayOf(0f, 0.25f, 0.65f, 1f),
+        Shader.TileMode.CLAMP
+    )
+
+    private val unitRollHighlightShader = LinearGradient(
+        0f, 0f, 1f, 0f,
+        intArrayOf(
+            Color.parseColor("#45000000"),
+            Color.parseColor("#A0FFFFFF"),
+            Color.parseColor("#25FFFFFF"),
+            Color.TRANSPARENT
+        ),
+        floatArrayOf(0f, 0.35f, 0.7f, 1f),
+        Shader.TileMode.CLAMP
+    )
+
+    private var bgGradShader: LinearGradient? = null
+    private var lastBgGradHeight = 0f
+    private var lastBgGradPreset = ""
+    private var cachedTopColor = Color.parseColor("#081636")
+    private var cachedBottomColor = Color.parseColor("#0046A0")
+    private var cachedWaveR = 0
+    private var cachedWaveG = 160
+    private var cachedWaveB = 255
+    private val bgGradPaint = Paint()
+
+    private fun setShaderGradient(shader: Shader, x0: Float, y0: Float, x1: Float, y1: Float) {
+        val dx = x1 - x0
+        val dy = y1 - y0
+        val safeDx = if (dx == 0f && dy == 0f) 0.001f else dx
+        shaderMatrixValues[0] = safeDx
+        shaderMatrixValues[1] = -dy
+        shaderMatrixValues[2] = x0
+        shaderMatrixValues[3] = dy
+        shaderMatrixValues[4] = safeDx
+        shaderMatrixValues[5] = y0
+        shaderMatrixValues[6] = 0f
+        shaderMatrixValues[7] = 0f
+        shaderMatrixValues[8] = 1f
+        shaderMatrix.setValues(shaderMatrixValues)
+        shader.setLocalMatrix(shaderMatrix)
+    }
+
     // Child views
     private val infoBar = VitaInfoBarView(context)
     private val clockView = VitaClockView(context)
@@ -136,6 +237,11 @@ class VitaPeelView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         infoBar.startMonitoring()
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                setRequestedFrameRate(120f)
+            } catch (_: Throwable) {}
+        }
     }
 
     fun reloadSettings() {
@@ -149,10 +255,13 @@ class VitaPeelView @JvmOverloads constructor(
         invalidate()
     }
 
-    fun resetPeel() {
+    fun resetPeel(force: Boolean = false) {
+        if (!force && (isDragging || isUnlocking || isUnlocked)) return
         idleAnimator?.cancel()
         isDragging = false
         isAnimating = false
+        isUnlocking = false
+        isUnlocked = false
         velocityTracker?.recycle()
         velocityTracker = null
 
@@ -170,14 +279,16 @@ class VitaPeelView @JvmOverloads constructor(
         reloadSettings()
     }
 
-    private fun initParticles() {
+    private fun initParticles(w: Float = 2400f, h: Float = 1080f) {
         particles.clear()
         val rnd = Random(42)
+        val maxW = if (w > 0f) w else 2400f
+        val maxH = if (h > 0f) h else 1080f
         for (i in 0..26) {
             particles.add(
                 Particle(
-                    x = rnd.nextFloat() * 2400f,
-                    y = rnd.nextFloat() * 1080f,
+                    x = rnd.nextFloat() * maxW,
+                    y = rnd.nextFloat() * maxH,
                     radius = rnd.nextFloat() * 2.5f + 1f,
                     speedY = rnd.nextFloat() * 0.6f + 0.3f,
                     swaySpeed = rnd.nextFloat() * 1.5f + 0.8f,
@@ -232,9 +343,9 @@ class VitaPeelView @JvmOverloads constructor(
             repeatCount = ValueAnimator.INFINITE
             repeatMode = ValueAnimator.REVERSE
             addUpdateListener {
-                if (!isDragging && !isAnimating) {
+                if (!isDragging && !isAnimating && !isUnlocked && !isUnlocking) {
                     val progress = it.animatedValue as Float
-                    idleFlutterOffset = sin(progress * Math.PI.toFloat()) * 12f
+                    idleFlutterOffset = sin(progress * Math.PI.toFloat()) * (10f * density)
                     invalidate()
                 }
             }
@@ -257,7 +368,7 @@ class VitaPeelView @JvmOverloads constructor(
 
     fun updateCardGeometry(w: Int, h: Int) {
         if (w <= 0 || h <= 0) return
-        val topBarH = (38 * resources.displayMetrics.density).toInt()
+        val topBarH = (38 * density).toInt()
         infoBar.measure(
             MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(topBarH, MeasureSpec.EXACTLY)
@@ -265,32 +376,52 @@ class VitaPeelView @JvmOverloads constructor(
         infoBar.layout(0, 0, w, topBarH)
 
         val sizePct = prefs.cardSizePercent.coerceIn(70, 100)
-        val availHeight = (h - topBarH).toFloat()
+        val availW = (w - cutoutLeft - cutoutRight).coerceAtLeast(100f)
+        val availH = (h - topBarH).toFloat().coerceAtLeast(100f)
 
         if (sizePct >= 100) {
-            cardRect.set(0f, topBarH.toFloat(), w.toFloat(), h.toFloat())
+            cardRect.set(cutoutLeft, topBarH.toFloat(), w - cutoutRight, h.toFloat())
         } else {
             val factor = (sizePct - 70f) / 30f // 0.0 to 1.0
-            val minW = w * 0.70f
-            val maxW = w * 0.97f
-            val minH = availHeight * 0.74f
-            val maxH = availHeight * 0.97f
 
-            val cardW = minW + (maxW - minW) * factor
-            val cardH = minH + (maxH - minH) * factor
+            if (w >= h) {
+                // Landscape: Stretched comfortably to the sides like the authentic PS Vita framing
+                val minW = availW * 0.78f
+                val maxW = availW * 0.96f
+                val cardW = minW + (maxW - minW) * factor
 
-            val centerX = w * 0.5f
-            val centerY = topBarH + availHeight * 0.5f
-            cardRect.set(
-                centerX - cardW * 0.5f,
-                centerY - cardH * 0.5f,
-                centerX + cardW * 0.5f,
-                centerY + cardH * 0.5f
-            )
+                val minH = availH * 0.74f
+                val maxH = availH * 0.95f
+                val cardH = minH + (maxH - minH) * factor
+
+                val centerX = cutoutLeft + availW * 0.5f
+                val centerY = topBarH + availH * 0.5f
+                cardRect.set(
+                    centerX - cardW * 0.5f,
+                    centerY - cardH * 0.5f,
+                    centerX + cardW * 0.5f,
+                    centerY + cardH * 0.5f
+                )
+            } else {
+                // Portrait mode: Responsive card fitting width with comfortable margins
+                val cardW = availW * (0.80f + 0.17f * factor)
+                val cardH = (cardW / 1.35f).coerceAtMost(availH * 0.85f)
+                val centerX = cutoutLeft + availW * 0.5f
+                val centerY = topBarH + availH * 0.45f
+                cardRect.set(
+                    centerX - cardW * 0.5f,
+                    centerY - cardH * 0.5f,
+                    centerX + cardW * 0.5f,
+                    centerY + cardH * 0.5f
+                )
+            }
         }
+        val cornerRadius = if (prefs.cardSizePercent >= 100) 0f else cardCornerRadius
+        cardPath.reset()
+        cardPath.addRoundRect(cardRect, cornerRadius, cornerRadius, Path.Direction.CW)
         infoBar.setCardBounds(cardRect.left, cardRect.right)
 
-        if (!isDragging && !isAnimating) {
+        if (!isDragging && !isAnimating && !isUnlocked && !isUnlocking) {
             val peelRect = PeelRect(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
             val idle = PagePeelMath.calculateCardIdleCurl(peelRect, idleFlutterOffset)
             currentTouchX = idle.x
@@ -298,9 +429,21 @@ class VitaPeelView @JvmOverloads constructor(
         }
     }
 
+    override fun onApplyWindowInsets(insets: android.view.WindowInsets): android.view.WindowInsets {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val cutout = insets.displayCutout
+            if (cutout != null) {
+                cutoutLeft = cutout.safeInsetLeft.toFloat()
+                cutoutRight = cutout.safeInsetRight.toFloat()
+            }
+        }
+        return super.onApplyWindowInsets(insets)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w > 0 && h > 0) {
+            initParticles(w.toFloat(), h.toFloat())
             updateCardGeometry(w, h)
         }
     }
@@ -313,22 +456,18 @@ class VitaPeelView @JvmOverloads constructor(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                // Quick-tap unlock shortcut: Tap Top-Right then Bottom-Left of the card
-                val isBottomLeft = x < cardRect.left + cardRect.width() * 0.35f && y > cardRect.bottom - cardRect.height() * 0.4f
-                val isTopRight = x > cardRect.right - cardRect.width() * 0.35f && y < cardRect.top + cardRect.height() * 0.4f
+                // Must initiate touch precisely in the top-right dog-ear region of the card
+                val cornerHitW = maxOf(72f * density, cardRect.width() * 0.22f)
+                val cornerHitH = maxOf(72f * density, cardRect.height() * 0.25f)
+                val isCornerHit = x >= (cardRect.right - cornerHitW) &&
+                                  x <= (cardRect.right + 32f * density) &&
+                                  y >= (cardRect.top - 32f * density) &&
+                                  y <= (cardRect.top + cornerHitH)
 
-                if (isBottomLeft && (System.currentTimeMillis() - lastTopRightTapTime) < 800L) {
-                    triggerUnlockAnimation()
-                    return true
-                }
-                if (isTopRight) {
-                    lastTopRightTapTime = System.currentTimeMillis()
-                }
-
-                // Check if touch is near top-right corner of the card
-                val distFromCorner = sqrt((x - cardRect.right).pow(2) + (y - cardRect.top).pow(2))
-                if (distFromCorner < cardRect.width() * 0.65f || isTopRight) {
+                if (isCornerHit) {
                     isDragging = true
+                    touchDownX = x
+                    touchDownY = y
                     currentTouchX = x
                     currentTouchY = y
                     velocityTracker = VelocityTracker.obtain()
@@ -339,6 +478,7 @@ class VitaPeelView @JvmOverloads constructor(
                     invalidate()
                     return true
                 }
+                return false
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -351,7 +491,7 @@ class VitaPeelView @JvmOverloads constructor(
                 }
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 if (isDragging) {
                     isDragging = false
                     velocityTracker?.addMovement(event)
@@ -361,15 +501,33 @@ class VitaPeelView @JvmOverloads constructor(
                     velocityTracker?.recycle()
                     velocityTracker = null
 
-                    val peelRect = PeelRect(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
-                    val peelState = PagePeelMath.calculateCardPeel(peelRect, currentTouchX, currentTouchY)
-                    val isFlingUnlock = vx < -1200f || (vx < -600f && vy > 600f)
+                    val dragDistance = hypot(x - touchDownX, y - touchDownY)
+                    val minUnlockDrag = maxOf(64f * density, cardRect.width() * 0.25f)
+                    val draggedLeft = touchDownX - x
+                    val draggedDown = y - touchDownY
+                    val isDraggedTowardUnlock = draggedLeft > (24f * density) && draggedDown > (24f * density)
 
-                    if (peelState.isThresholdMet || isFlingUnlock) {
-                        triggerUnlockAnimation()
+                    peelEngine.calculate(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom, currentTouchX, currentTouchY)
+
+                    val isFlingUnlock = isDraggedTowardUnlock && (vx < -800f || (vx < -450f && vy > 450f))
+                    val isThresholdUnlock = dragDistance >= minUnlockDrag && isDraggedTowardUnlock &&
+                            (peelEngine.isThresholdMet || currentTouchX < (cardRect.left + cardRect.width() * 0.42f))
+
+                    if (isThresholdUnlock || isFlingUnlock) {
+                        triggerUnlockAnimation(vx, vy)
                     } else {
-                        triggerSpringBackAnimation()
+                        triggerSpringBackAnimation(vx, vy)
                     }
+                    return true
+                }
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                if (isDragging) {
+                    isDragging = false
+                    velocityTracker?.recycle()
+                    velocityTracker = null
+                    triggerSpringBackAnimation()
                     return true
                 }
             }
@@ -377,19 +535,36 @@ class VitaPeelView @JvmOverloads constructor(
         return super.onTouchEvent(event)
     }
 
-    private fun triggerUnlockAnimation() {
+    private fun triggerUnlockAnimation(flingVx: Float = 0f, flingVy: Float = 0f) {
         isAnimating = true
+        isUnlocking = true
         soundManager.playUnlockSound()
         vibrateUnlock()
 
         val startX = currentTouchX
         val startY = currentTouchY
-        val targetX = cardRect.left - cardRect.width() * 0.6f
-        val targetY = cardRect.bottom + cardRect.height() * 0.8f
+        val targetX = cardRect.left - cardRect.width() * 0.85f
+        val targetY = cardRect.bottom + cardRect.height() * 0.85f
+
+        val dist = hypot(targetX - startX, targetY - startY)
+        val cardDiag = hypot(cardRect.width(), cardRect.height())
+        val progressRemaining = (dist / cardDiag).coerceIn(0.12f, 1f)
+
+        val flingSpeed = hypot(flingVx, flingVy)
+        val animDuration: Long
+        val animInterpolator: android.view.animation.Interpolator
+
+        if (flingSpeed > 900f) {
+            animDuration = ((dist / flingSpeed) * 1000f).toLong().coerceIn(120L, 250L)
+            animInterpolator = DecelerateInterpolator(1.2f)
+        } else {
+            animDuration = (progressRemaining * 260f).toLong().coerceIn(140L, 260L)
+            animInterpolator = AccelerateInterpolator(1.25f)
+        }
 
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 380
-            interpolator = AccelerateInterpolator(1.6f)
+            duration = animDuration
+            interpolator = animInterpolator
             addUpdateListener {
                 val f = it.animatedValue as Float
                 currentTouchX = startX + (targetX - startX) * f
@@ -399,23 +574,42 @@ class VitaPeelView @JvmOverloads constructor(
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     isAnimating = false
-                    onUnlockListener?.onUnlock()
+                    isUnlocking = false
+                    isUnlocked = true
+                    currentTouchX = targetX
+                    currentTouchY = targetY
+                    invalidate()
+                    if (isPreviewMode) {
+                        postDelayed({
+                            if (isPreviewMode) {
+                                triggerSpringBackAnimation()
+                            }
+                        }, 600)
+                    } else {
+                        onUnlockListener?.onUnlock()
+                    }
                 }
             })
         }
         anim.start()
     }
 
-    private fun triggerSpringBackAnimation() {
+    private fun triggerSpringBackAnimation(flingVx: Float = 0f, flingVy: Float = 0f) {
         isAnimating = true
+        isUnlocking = false
+        isUnlocked = false
         val startX = currentTouchX
         val startY = currentTouchY
         val peelRect = PeelRect(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
         val idle = PagePeelMath.calculateCardIdleCurl(peelRect, 0f)
 
+        val dist = hypot(idle.x - startX, idle.y - startY)
+        val cardDiag = hypot(cardRect.width(), cardRect.height())
+        val animDuration = ((dist / cardDiag) * 300f).toLong().coerceIn(150L, 260L)
+
         val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 320
-            interpolator = OvershootInterpolator(1.2f)
+            duration = animDuration
+            interpolator = OvershootInterpolator(1.15f)
             addUpdateListener {
                 val f = it.animatedValue as Float
                 currentTouchX = startX + (idle.x - startX) * f
@@ -425,6 +619,12 @@ class VitaPeelView @JvmOverloads constructor(
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     isAnimating = false
+                    isUnlocked = false
+                    isUnlocking = false
+                    currentTouchX = idle.x
+                    currentTouchY = idle.y
+                    startIdleAnimation()
+                    invalidate()
                 }
             })
         }
@@ -457,46 +657,39 @@ class VitaPeelView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0 || h <= 0) return
 
+        if (isUnlocked) {
+            // When unlocked, card sheet is completely gone: display the clean revealed underlying background!
+            drawUnderlyingLayer(canvas, 0f, 0f, w, h)
+            return
+        }
+
         val cornerRadius = if (prefs.cardSizePercent >= 100) 0f else cardCornerRadius
 
-        // 1. Draw Base Front Wallpaper across the full screen!
-        // Outside the card is NOT black: it is the same background as the card!
-        drawBaseWallpaper(canvas, w, h)
-
-        val peelRect = PeelRect(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
-
         // Determine current touch for card peel
-        val touchX = if (!isDragging && !isAnimating) {
+        val touchX: Float
+        val touchY: Float
+        if (!isDragging && !isAnimating && !isUnlocking) {
+            val peelRect = PeelRect(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
             val idle = PagePeelMath.calculateCardIdleCurl(peelRect, idleFlutterOffset)
-            idle.x
+            touchX = idle.x
+            touchY = idle.y
         } else {
-            currentTouchX
+            touchX = currentTouchX
+            touchY = currentTouchY
         }
 
-        val touchY = if (!isDragging && !isAnimating) {
-            val idle = PagePeelMath.calculateCardIdleCurl(peelRect, idleFlutterOffset)
-            idle.y
-        } else {
-            currentTouchY
-        }
+        peelEngine.calculate(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom, touchX, touchY)
 
-        val peelState = PagePeelMath.calculateCardPeel(peelRect, touchX, touchY)
-        val foldLine = peelState.foldLine
-
-        val fullCardPath = Path().apply {
-            addRoundRect(cardRect, cornerRadius, cornerRadius, Path.Direction.CW)
-        }
-
-        if (foldLine == null) {
-            // Check if card has been fully peeled past the threshold during unlock animation
-            if (peelState.isThresholdMet && (touchX < cardRect.left || touchY > cardRect.bottom)) {
-                infoBar.draw(canvas)
+        if (!peelEngine.hasFoldLine) {
+            if (isUnlocking || (peelEngine.isThresholdMet && (touchX < cardRect.left || touchY > cardRect.bottom))) {
+                drawUnderlyingLayer(canvas, 0f, 0f, w, h)
                 return
             }
-            // No peel active: draw clock, date, camera icon on the card
+
+            // Normal closed card with resting idle curl
+            drawBaseWallpaper(canvas, w, h)
             clockView.drawOnCard(canvas, cardRect)
 
-            // Draw the PS Vita Cutout Line ("recorte cinza / branca do quadrado do meio")
             if (cornerRadius > 0f) {
                 canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardCutoutShadowPaint)
                 canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardCutoutPaint)
@@ -505,208 +698,243 @@ class VitaPeelView @JvmOverloads constructor(
             return
         }
 
-        // --- Active Peel (Resting curl or dragging) ---
+        // --- Active Peel ---
+        // 1. Draw base wallpaper behind the unpeeled card
+        drawBaseWallpaper(canvas, w, h)
+
         // 2. Draw REVEALED UNDERNEATH LAYER inside cardRect
         canvas.save()
-        canvas.clipPath(fullCardPath)
-        drawUnderlyingLayer(canvas, cardRect)
+        canvas.clipPath(cardPath)
+        drawUnderlyingLayer(canvas, cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
         canvas.restore()
 
-        // --- 3. Card Peeling Geometry ---
-        val p1 = foldLine.p1
-        val p2 = foldLine.p2
-        val dx = p2.x - p1.x
-        val dy = p2.y - p1.y
+        // 3. Card Peeling Geometry
+        val p1X = peelEngine.p1X
+        val p1Y = peelEngine.p1Y
+        val p2X = peelEngine.p2X
+        val p2Y = peelEngine.p2Y
+        val dx = p2X - p1X
+        val dy = p2Y - p1Y
         val len = hypot(dx, dy)
         val ux = if (len > 0f) dx / len else 1f
         val uy = if (len > 0f) dy / len else 0f
 
         val span = 5000f
-        val p1ExtX = p1.x - ux * span
-        val p1ExtY = p1.y - uy * span
-        val p2ExtX = p2.x + ux * span
-        val p2ExtY = p2.y + uy * span
+        val p1ExtX = p1X - ux * span
+        val p1ExtY = p1Y - uy * span
+        val p2ExtX = p2X + ux * span
+        val p2ExtY = p2Y + uy * span
 
-        val nx = foldLine.normal.x
-        val ny = foldLine.normal.y
+        val nx = peelEngine.normalX
+        val ny = peelEngine.normalY
 
-        // Half-plane containing the peeled corner (in direction of -normal)
-        val cornerSidePoly = Path().apply {
-            moveTo(p1ExtX, p1ExtY)
-            lineTo(p2ExtX, p2ExtY)
-            lineTo(p2ExtX - nx * span, p2ExtY - ny * span)
-            lineTo(p1ExtX - nx * span, p1ExtY - ny * span)
-            close()
-        }
+        // Half-plane containing the peeled corner
+        cornerSidePolyPath.reset()
+        cornerSidePolyPath.moveTo(p1ExtX, p1ExtY)
+        cornerSidePolyPath.lineTo(p2ExtX, p2ExtY)
+        cornerSidePolyPath.lineTo(p2ExtX - nx * span, p2ExtY - ny * span)
+        cornerSidePolyPath.lineTo(p1ExtX - nx * span, p1ExtY - ny * span)
+        cornerSidePolyPath.close()
 
-        // Unpeeled region = Full card minus cornerSidePoly
-        val unpeeledRegion = Path()
-        unpeeledRegion.op(fullCardPath, cornerSidePoly, Path.Op.DIFFERENCE)
-
-        // Peeled region = Full card intersected with cornerSidePoly
-        val peeledRegion = Path()
-        peeledRegion.op(fullCardPath, cornerSidePoly, Path.Op.INTERSECT)
-
-        // Draw Front Card on the Unpeeled Region
+        // Draw Front Card on the Unpeeled Region using hardware-accelerated clipOutPath
         canvas.save()
-        canvas.clipPath(unpeeledRegion)
+        canvas.clipPath(cardPath)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            canvas.clipOutPath(cornerSidePolyPath)
+        } else {
+            @Suppress("DEPRECATION")
+            canvas.clipPath(cornerSidePolyPath, Region.Op.DIFFERENCE)
+        }
         drawFrontCardContent(canvas, cardRect)
         canvas.restore()
 
-        // Draw the PS Vita Cutout Line around card frame ("recorte cinza / branca")
+        // Cutout line around card
         if (cornerRadius > 0f) {
             canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardCutoutShadowPaint)
             canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardCutoutPaint)
         }
 
-        // --- 5. Draw Drop Shadow beneath the folded sheet onto the underlying photo ---
-        val shadowWidth = 50f
-        dropShadowPaint.shader = LinearGradient(
-            foldLine.midpoint.x - nx * shadowWidth,
-            foldLine.midpoint.y - ny * shadowWidth,
-            foldLine.midpoint.x,
-            foldLine.midpoint.y,
-            intArrayOf(Color.TRANSPARENT, Color.parseColor("#B0000000")),
-            floatArrayOf(0f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        // 4. Drop Shadow beneath the folded sheet onto the underlying photo
+        val shadowW = shadowWidth
+        shadowPath.reset()
+        shadowPath.moveTo(p1X, p1Y)
+        shadowPath.lineTo(p2X, p2Y)
+        shadowPath.lineTo(p2X - nx * shadowW, p2Y - ny * shadowW)
+        shadowPath.lineTo(p1X - nx * shadowW, p1Y - ny * shadowW)
+        shadowPath.close()
 
-        val shadowPath = Path().apply {
-            moveTo(p1.x, p1.y)
-            lineTo(p2.x, p2.y)
-            lineTo(p2.x - nx * shadowWidth, p2.y - ny * shadowWidth)
-            lineTo(p1.x - nx * shadowWidth, p1.y - ny * shadowWidth)
-            close()
-        }
+        setShaderGradient(
+            unitShadowShader,
+            peelEngine.midX - nx * shadowW,
+            peelEngine.midY - ny * shadowW,
+            peelEngine.midX,
+            peelEngine.midY
+        )
+        dropShadowPaint.shader = unitShadowShader
 
         canvas.save()
-        canvas.clipPath(fullCardPath)
+        canvas.clipPath(cardPath)
         canvas.drawPath(shadowPath, dropShadowPaint)
         canvas.restore()
 
-        // --- 6. Draw Backside of the Curled Sheet (Reflected Flap with rounded corner) ---
-        val matrixValues = PagePeelMath.calculateReflectionMatrix(foldLine)
-        val reflectionMatrix = Matrix().apply { setValues(matrixValues) }
+        // 5. Backside of Curled Sheet (Reflected Flap with rounded corner)
+        peeledRegionPath.reset()
+        peeledRegionPath.op(cardPath, cornerSidePolyPath, Path.Op.INTERSECT)
 
-        val foldedFlapPath = Path()
-        peeledRegion.transform(reflectionMatrix, foldedFlapPath)
+        peelEngine.updateReflectionMatrix()
+        reflectionMatrix.setValues(peelEngine.reflectionMatrixValues)
 
-        // Dark grey to metallic shaded gradient matching PS Vita reference image
-        peelBackPaint.shader = LinearGradient(
-            foldLine.midpoint.x, foldLine.midpoint.y,
-            touchX, touchY,
-            intArrayOf(
-                Color.parseColor("#646A74"),
-                Color.parseColor("#444951"),
-                Color.parseColor("#2A2D33"),
-                Color.parseColor("#1B1D21")
-            ),
-            floatArrayOf(0f, 0.25f, 0.65f, 1f),
-            Shader.TileMode.CLAMP
+        foldedFlapPath.reset()
+        peeledRegionPath.transform(reflectionMatrix, foldedFlapPath)
+
+        setShaderGradient(
+            unitPeelBackShader,
+            peelEngine.midX,
+            peelEngine.midY,
+            touchX,
+            touchY
         )
+        peelBackPaint.shader = unitPeelBackShader
 
         canvas.drawPath(foldedFlapPath, peelBackPaint)
         canvas.drawPath(foldedFlapPath, cardBorderPaint)
 
-        // --- 7. Draw Curled Cylindrical Roll Highlight along the fold crease ---
-        val rollRadius = 26f
-        rollHighlightPaint.shader = LinearGradient(
-            foldLine.midpoint.x, foldLine.midpoint.y,
-            foldLine.midpoint.x + nx * rollRadius,
-            foldLine.midpoint.y + ny * rollRadius,
-            intArrayOf(
-                Color.parseColor("#45000000"),
-                Color.parseColor("#A0FFFFFF"),
-                Color.parseColor("#25FFFFFF"),
-                Color.TRANSPARENT
-            ),
-            floatArrayOf(0f, 0.35f, 0.7f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        // 6. Curled Cylindrical Roll Highlight along the fold crease
+        val rollR = rollRadius
+        rollPath.reset()
+        rollPath.moveTo(p1X, p1Y)
+        rollPath.lineTo(p2X, p2Y)
+        rollPath.lineTo(p2X + nx * rollR, p2Y + ny * rollR)
+        rollPath.lineTo(p1X + nx * rollR, p1Y + ny * rollR)
+        rollPath.close()
 
-        val rollPath = Path().apply {
-            moveTo(p1.x, p1.y)
-            lineTo(p2.x, p2.y)
-            lineTo(p2.x + nx * rollRadius, p2.y + ny * rollRadius)
-            lineTo(p1.x + nx * rollRadius, p1.y + ny * rollRadius)
-            close()
-        }
+        setShaderGradient(
+            unitRollHighlightShader,
+            peelEngine.midX,
+            peelEngine.midY,
+            peelEngine.midX + nx * rollR,
+            peelEngine.midY + ny * rollR
+        )
+        rollHighlightPaint.shader = unitRollHighlightShader
+
         canvas.drawPath(rollPath, rollHighlightPaint)
 
-        // 8. Draw Top Info Bar (Black status strip with time, battery, icons)
+        // 7. Top Info Bar
         infoBar.draw(canvas)
     }
+
+    private fun updateBgPresetColors() {
+        val preset = prefs.backWallpaperPreset
+        if (preset == lastBgGradPreset && bgGradShader != null) return
+        lastBgGradPreset = preset
+        when (preset) {
+            "red" -> {
+                cachedTopColor = Color.parseColor("#340810")
+                cachedBottomColor = Color.parseColor("#800B1D")
+                cachedWaveR = 255; cachedWaveG = 45; cachedWaveB = 80
+            }
+            "green" -> {
+                cachedTopColor = Color.parseColor("#062414")
+                cachedBottomColor = Color.parseColor("#0B6030")
+                cachedWaveR = 30; cachedWaveG = 220; cachedWaveB = 100
+            }
+            "purple" -> {
+                cachedTopColor = Color.parseColor("#220834")
+                cachedBottomColor = Color.parseColor("#581285")
+                cachedWaveR = 180; cachedWaveG = 50; cachedWaveB = 255
+            }
+            "amber" -> {
+                cachedTopColor = Color.parseColor("#341806")
+                cachedBottomColor = Color.parseColor("#80400B")
+                cachedWaveR = 255; cachedWaveG = 160; cachedWaveB = 30
+            }
+            "black" -> {
+                cachedTopColor = Color.parseColor("#18191C")
+                cachedBottomColor = Color.parseColor("#0A0B0D")
+                cachedWaveR = 100; cachedWaveG = 110; cachedWaveB = 125
+            }
+            else -> {
+                cachedTopColor = Color.parseColor("#081636")
+                cachedBottomColor = Color.parseColor("#0046A0")
+                cachedWaveR = 0; cachedWaveG = 160; cachedWaveB = 255
+            }
+        }
+        bgGradShader = null
+    }
+
+    private val underlyingSrcRect = Rect()
+    private val underlyingDstRect = Rect()
 
     /**
      * Draws the Underlying Revealed Layer (Behind the card).
      * By default: classic vibrant PS Vita Blue Waves & crystal particles!
      */
-    private fun drawUnderlyingLayer(canvas: Canvas, rect: RectF) {
+    private fun drawUnderlyingLayer(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float) {
         if (backBitmap != null) {
             val bmp = backBitmap!!
-            val src = Rect(0, 0, bmp.width, bmp.height)
-            val dst = Rect(rect.left.toInt(), rect.top.toInt(), rect.right.toInt(), rect.bottom.toInt())
-            canvas.drawBitmap(bmp, src, dst, bitmapPaint)
+            underlyingSrcRect.set(0, 0, bmp.width, bmp.height)
+            underlyingDstRect.set(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
+            canvas.drawBitmap(bmp, underlyingSrcRect, underlyingDstRect, bitmapPaint)
         } else {
-            // Live animated PS Vita Crystal Waves for chosen color preset
-            val w = rect.width()
-            val h = rect.height()
+            val h = bottom - top
+            updateBgPresetColors()
 
-            val (topColor, bottomColor, waveR, waveG, waveB) = when (prefs.backWallpaperPreset) {
-                "red" -> arrayOf(Color.parseColor("#340810"), Color.parseColor("#800B1D"), 255, 45, 80)
-                "green" -> arrayOf(Color.parseColor("#062414"), Color.parseColor("#0B6030"), 30, 220, 100)
-                "purple" -> arrayOf(Color.parseColor("#220834"), Color.parseColor("#581285"), 180, 50, 255)
-                "amber" -> arrayOf(Color.parseColor("#341806"), Color.parseColor("#80400B"), 255, 160, 30)
-                "black" -> arrayOf(Color.parseColor("#18191C"), Color.parseColor("#0A0B0D"), 100, 110, 125)
-                else -> arrayOf(Color.parseColor("#081636"), Color.parseColor("#0046A0"), 0, 160, 255) // authentic blue
+            if (bgGradShader == null || lastBgGradHeight != h) {
+                lastBgGradHeight = h
+                bgGradShader = LinearGradient(
+                    0f, top, 0f, bottom,
+                    cachedTopColor, cachedBottomColor,
+                    Shader.TileMode.CLAMP
+                )
+                bgGradPaint.shader = bgGradShader
             }
-
-            val bgGrad = LinearGradient(
-                rect.left, rect.top, rect.left, rect.bottom,
-                topColor as Int, bottomColor as Int,
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawRect(rect, Paint().apply { shader = bgGrad })
+            canvas.drawRect(left, top, right, bottom, bgGradPaint)
 
             val t = waveTime
-            val r = waveR as Int
-            val g = waveG as Int
-            val b = waveB as Int
+            val r = cachedWaveR
+            val g = cachedWaveG
+            val b = cachedWaveB
 
             wavePaint.color = Color.argb(90, r, g, b)
-            val path1 = Path().apply {
-                moveTo(rect.left, rect.bottom)
-                for (x in rect.left.toInt()..rect.right.toInt() step 20) {
-                    val fx = x.toFloat()
-                    val y = rect.top + h * 0.55f + sin(fx * 0.0028f + t * 0.9f) * 60f + cos(fx * 0.0016f - t * 0.5f) * 35f
-                    lineTo(fx, y)
-                }
-                lineTo(rect.right, rect.bottom)
-                close()
+            wavePath1.reset()
+            wavePath1.moveTo(left, bottom)
+            val leftI = left.toInt()
+            val rightI = right.toInt()
+            var curX = leftI
+            while (curX <= rightI) {
+                val fx = curX.toFloat()
+                val y = top + h * 0.55f + sin(fx * 0.0028f + t * 0.9f) * 60f + cos(fx * 0.0016f - t * 0.5f) * 35f
+                wavePath1.lineTo(fx, y)
+                curX += 28
             }
-            canvas.drawPath(path1, wavePaint)
+            wavePath1.lineTo(right, bottom)
+            wavePath1.close()
+            canvas.drawPath(wavePath1, wavePaint)
 
             wavePaint.color = Color.argb(125, r, g, b)
-            val path2 = Path().apply {
-                moveTo(rect.left, rect.bottom)
-                for (x in rect.left.toInt()..rect.right.toInt() step 20) {
-                    val fx = x.toFloat()
-                    val y = rect.top + h * 0.65f + sin(fx * 0.0036f - t * 0.7f + 1.2f) * 80f + cos(fx * 0.0020f + t * 0.6f) * 30f
-                    lineTo(fx, y)
-                }
-                lineTo(rect.right, rect.bottom)
-                close()
+            wavePath2.reset()
+            wavePath2.moveTo(left, bottom)
+            curX = leftI
+            while (curX <= rightI) {
+                val fx = curX.toFloat()
+                val y = top + h * 0.65f + sin(fx * 0.0036f - t * 0.7f + 1.2f) * 80f + cos(fx * 0.0020f + t * 0.6f) * 30f
+                wavePath2.lineTo(fx, y)
+                curX += 28
             }
-            canvas.drawPath(path2, wavePaint)
+            wavePath2.lineTo(right, bottom)
+            wavePath2.close()
+            canvas.drawPath(wavePath2, wavePaint)
         }
 
         // Draw ambient floating crystal dust
         if (prefs.isFloatingParticlesEnabled) {
-            for (p in particles) {
+            val count = particles.size
+            for (i in 0 until count) {
+                val p = particles[i]
                 p.y -= p.speedY
-                if (p.y < rect.top) {
-                    p.y = rect.bottom
-                    p.x = rect.left + Random.nextFloat() * rect.width()
+                if (p.y < top) {
+                    p.y = bottom
+                    p.x = left + Random.nextFloat() * (right - left)
                 }
                 val swayX = p.x + sin(waveTime * p.swaySpeed) * p.swayDist
                 particlePaint.color = Color.argb(p.alpha, 255, 255, 255)

@@ -1,6 +1,7 @@
 package com.psvita.lockscreen
 
 import android.app.KeyguardManager
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -23,11 +24,14 @@ class VitaLockActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Lock to Landscape
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Lock to Landscape safely
+        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.O) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
 
-        // Setup lock screen flags and full edge-to-edge layout past cutouts
+        // Setup lock screen flags, refresh rate and full edge-to-edge layout past cutouts
         configureLockScreenFlags()
+        configureDisplayRefreshRate()
         enableImmersiveMode()
 
         peelView = VitaPeelView(this).apply {
@@ -36,6 +40,15 @@ class VitaLockActivity : AppCompatActivity() {
                     unlockDevice()
                 }
             }
+        }
+
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(peelView) { _, insets ->
+            val cutout = insets.displayCutout
+            if (cutout != null) {
+                peelView.cutoutLeft = cutout.safeInsetLeft.toFloat()
+                peelView.cutoutRight = cutout.safeInsetRight.toFloat()
+            }
+            insets
         }
 
         setContentView(peelView)
@@ -57,6 +70,7 @@ class VitaLockActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         configureLockScreenFlags()
+        configureDisplayRefreshRate()
         enableImmersiveMode()
         peelView.resetPeel()
         val prefs = LockPreferences(this)
@@ -68,6 +82,7 @@ class VitaLockActivity : AppCompatActivity() {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         configureLockScreenFlags()
+        configureDisplayRefreshRate()
         enableImmersiveMode()
     }
 
@@ -75,6 +90,27 @@ class VitaLockActivity : AppCompatActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             enableImmersiveMode()
+        }
+    }
+
+    private fun configureDisplayRefreshRate() {
+        // Explicitly select the highest available refresh rate (e.g. 120Hz on high-refresh panels)
+        // On 60Hz panels, maxMode will cleanly be the 60Hz mode, perfectly safe and without breaking.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val d = display
+            val modes = d?.supportedModes
+            if (!modes.isNullOrEmpty()) {
+                val maxMode = modes.maxByOrNull { it.refreshRate }
+                if (maxMode != null) {
+                    val lp = window.attributes
+                    lp.preferredDisplayModeId = maxMode.modeId
+                    window.attributes = lp
+                }
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val lp = window.attributes
+            lp.preferredRefreshRate = 120f
+            window.attributes = lp
         }
     }
 
@@ -95,12 +131,12 @@ class VitaLockActivity : AppCompatActivity() {
             setTurnScreenOn(false)
         }
         @Suppress("DEPRECATION")
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        @Suppress("DEPRECATION")
         window.addFlags(
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
             WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
         )
-        @Suppress("DEPRECATION")
-        window.clearFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
     }
 
     private fun enableImmersiveMode() {
@@ -127,8 +163,8 @@ class VitaLockActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && keyguardManager != null) {
             keyguardManager.requestDismissKeyguard(this, null)
         }
-        moveTaskToBack(true)
-        overridePendingTransition(0, android.R.anim.fade_out)
+        finish()
+        overridePendingTransition(0, 0)
     }
 
     @Deprecated("Deprecated in Java", ReplaceWith("Unit"))
