@@ -12,3 +12,11 @@ captures/
 *.apk
 *.ap_
 *.dex
+
+# Recordings and test captures
+*.mp4
+/*_frames/
+/iisu_home.png
+/lock_*.png
+/test_idle_new.png
+/top_right_crop.png

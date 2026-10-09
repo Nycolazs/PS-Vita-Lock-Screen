@@ -16,6 +16,8 @@ enum class ClockPosition(val id: Int) {
 
 class LockPreferences(context: Context) {
 
+    private val appContext: Context = context.applicationContext ?: context
+
     private val prefs: SharedPreferences = run {
         val targetContext = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             try {
@@ -41,7 +43,8 @@ class LockPreferences(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_LOCKSCREEN_ENABLED, value).apply()
 
     var is24HourFormat: Boolean
-        get() = prefs.getBoolean(KEY_24H_FORMAT, false) // Default to 12h as shown in PS Vita screenshot (7:53 PM)
+        // Follows the device's 12/24h setting until the user picks one in the app
+        get() = prefs.getBoolean(KEY_24H_FORMAT, android.text.format.DateFormat.is24HourFormat(appContext))
         set(value) = prefs.edit().putBoolean(KEY_24H_FORMAT, value).apply()
 
     var clockPosition: ClockPosition

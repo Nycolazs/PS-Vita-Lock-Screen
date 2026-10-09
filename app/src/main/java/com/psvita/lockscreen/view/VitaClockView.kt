@@ -44,19 +44,33 @@ class VitaClockView @JvmOverloads constructor(
     private var cachedAmPmStr: String = ""
     private var cachedDateStr: String = ""
     private var lastFormattedMinute: Long = -1L
+    private var lastFormattedLocale: Locale? = null
 
     fun updateTimeStrings(force: Boolean = false) {
         val currentMinute = System.currentTimeMillis() / 60000L
-        if (!force && currentMinute == lastFormattedMinute && cachedTimeStr.isNotEmpty()) return
+        val locale = currentLocale()
+        if (!force && currentMinute == lastFormattedMinute && locale == lastFormattedLocale && cachedTimeStr.isNotEmpty()) return
         lastFormattedMinute = currentMinute
+        lastFormattedLocale = locale
         val now = Date()
         val is24h = prefs.is24HourFormat
         val timePattern = if (is24h) "HH:mm" else "h:mm"
         cachedTimeStr = SimpleDateFormat(timePattern, Locale.US).format(now)
         cachedAmPmStr = if (!is24h) SimpleDateFormat("a", Locale.US).format(now) else ""
-        val datePattern = "MMMM d (EEEE)"
-        cachedDateStr = SimpleDateFormat(datePattern, Locale.US).format(now)
+        cachedDateStr = SimpleDateFormat(localizedDatePattern(locale), locale).format(now)
     }
+
+    /** PS Vita style "October 8 (Thursday)", using the device language's day/month order. */
+    private fun localizedDatePattern(locale: Locale): String {
+        if (locale.language == Locale.ENGLISH.language) return "MMMM d (EEEE)"
+        val dayMonth = android.text.format.DateFormat.getBestDateTimePattern(locale, "dMMMM")
+        return "$dayMonth (EEEE)"
+    }
+
+    // The app can start during direct boot, before Locale.getDefault() reflects the user's
+    // language, so read it from the current configuration instead.
+    private fun currentLocale(): Locale =
+        context.resources.configuration.locales.get(0) ?: Locale.getDefault()
 
     private val timeReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, intent: Intent?) {

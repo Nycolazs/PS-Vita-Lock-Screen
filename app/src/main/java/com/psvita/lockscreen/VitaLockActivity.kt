@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
@@ -33,6 +34,9 @@ class VitaLockActivity : AppCompatActivity() {
         configureLockScreenFlags()
         configureDisplayRefreshRate()
         enableImmersiveMode()
+
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+        window.decorView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
         peelView = VitaPeelView(this).apply {
             onUnlockListener = object : VitaPeelView.OnUnlockListener {
@@ -64,7 +68,7 @@ class VitaLockActivity : AppCompatActivity() {
         setIntent(intent)
         configureLockScreenFlags()
         enableImmersiveMode()
-        peelView.resetPeel()
+        peelView.resetPeel(force = true)
     }
 
     override fun onResume() {
@@ -72,7 +76,7 @@ class VitaLockActivity : AppCompatActivity() {
         configureLockScreenFlags()
         configureDisplayRefreshRate()
         enableImmersiveMode()
-        peelView.resetPeel()
+        peelView.resetPeel(force = true)
         val prefs = LockPreferences(this)
         if (prefs.isLockscreenEnabled) {
             LockScreenService.start(this)
@@ -167,9 +171,27 @@ class VitaLockActivity : AppCompatActivity() {
         overridePendingTransition(0, 0)
     }
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        // Gamepad A / Start (or Enter on a keyboard) peels the card off, like a console start screen
+        if (event.repeatCount == 0 && keyCode in UNLOCK_KEYS) {
+            peelView.peelAndUnlock()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     @Deprecated("Deprecated in Java", ReplaceWith("Unit"))
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         // Prevent accidental dismissal of lock screen
+    }
+
+    companion object {
+        private val UNLOCK_KEYS = setOf(
+            KeyEvent.KEYCODE_BUTTON_A,
+            KeyEvent.KEYCODE_BUTTON_START,
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER
+        )
     }
 }

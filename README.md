@@ -67,7 +67,7 @@ Tested and optimized for **Samsung Galaxy S20 FE**, **Galaxy A34**, and other mo
 ## 🚀 Installation & Getting Started
 
 ### 1. Download the APK
-Download the latest `app-debug.apk` directly from the [**GitHub Releases**](https://github.com/Nycolazs/PS-Vita-Lock-Screen-/releases) page.
+Download the latest `PS-Vita-LockScreen-v1.2.0.apk` directly from the [**GitHub Releases**](https://github.com/Nycolazs/PS-Vita-Lock-Screen/releases) page.
 
 ### 2. Install on Android
 1. Open the downloaded APK on your device.
@@ -97,8 +97,8 @@ To enjoy the true PS Vita lock screen experience without the Samsung default swi
 ### Build Steps
 ```bash
 # Clone the repository
-git clone https://github.com/Nycolazs/PS-Vita-Lock-Screen-.git
-cd PS-Vita-Lock-Screen-
+git clone https://github.com/Nycolazs/PS-Vita-Lock-Screen.git
+cd PS-Vita-Lock-Screen
 
 # Build Debug APK
 ./gradlew assembleDebug

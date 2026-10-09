@@ -64,8 +64,8 @@ object PagePeelMath {
             val width = right - left
             val height = bottom - top
 
-            val clampedX = touchX.coerceIn(left - width * 0.5f, right)
-            val clampedY = touchY.coerceIn(top, bottom + height * 0.5f)
+            val clampedX = touchX.coerceIn(left - width * 3.5f, right)
+            val clampedY = touchY.coerceIn(top, bottom + height * 3.5f)
 
             val vx = clampedX - cornerX
             val vy = clampedY - cornerY
@@ -177,8 +177,8 @@ object PagePeelMath {
         defaultRadius: Float = 60f
     ): PeelState {
         val corner = PeelPoint(rect.right, rect.top)
-        val clampedX = touchX.coerceIn(rect.left - rect.width() * 0.5f, rect.right)
-        val clampedY = touchY.coerceIn(rect.top, rect.bottom + rect.height() * 0.5f)
+        val clampedX = touchX.coerceIn(rect.left - rect.width() * 3.5f, rect.right)
+        val clampedY = touchY.coerceIn(rect.top, rect.bottom + rect.height() * 3.5f)
         val touch = PeelPoint(clampedX, clampedY)
 
         val vx = touch.x - corner.x

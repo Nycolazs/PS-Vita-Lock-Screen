@@ -74,11 +74,13 @@ class VitaPeelView @JvmOverloads constructor(
     private var isAnimating = false
     private var isUnlocking = false
     private var isUnlocked = false
+    private var unlockProgress = 0f
     private var currentTouchX = 0f
     private var currentTouchY = 0f
     private var velocityTracker: VelocityTracker? = null
     private var touchDownX = 0f
     private var touchDownY = 0f
+    private var peelAnimator: ValueAnimator? = null
 
     // Idle flutter animation
     private var idleAnimator: ValueAnimator? = null
@@ -257,11 +259,14 @@ class VitaPeelView @JvmOverloads constructor(
 
     fun resetPeel(force: Boolean = false) {
         if (!force && (isDragging || isUnlocking || isUnlocked)) return
+        peelAnimator?.cancel()
+        peelAnimator = null
         idleAnimator?.cancel()
         isDragging = false
         isAnimating = false
         isUnlocking = false
         isUnlocked = false
+        unlockProgress = 0f
         velocityTracker?.recycle()
         velocityTracker = null
 
@@ -535,47 +540,66 @@ class VitaPeelView @JvmOverloads constructor(
         return super.onTouchEvent(event)
     }
 
+    /**
+     * Peels the card off automatically, as if the corner had been dragged.
+     * Used for unlocking with a gamepad button.
+     */
+    fun peelAndUnlock() {
+        if (isDragging || isUnlocking || isUnlocked) return
+        soundManager.playPeelSound()
+        triggerUnlockAnimation()
+    }
+
     private fun triggerUnlockAnimation(flingVx: Float = 0f, flingVy: Float = 0f) {
+        peelAnimator?.cancel()
+        idleAnimator?.cancel()
         isAnimating = true
         isUnlocking = true
+        unlockProgress = 0f
         soundManager.playUnlockSound()
         vibrateUnlock()
 
         val startX = currentTouchX
         val startY = currentTouchY
-        val targetX = cardRect.left - cardRect.width() * 0.85f
-        val targetY = cardRect.bottom + cardRect.height() * 0.85f
+        // Generously clear the bottom-left corner and borders so the entire sheet,
+        // the drop shadow, and the reflection flap completely glide off-screen.
+        val targetX = cardRect.left - cardRect.width() * 1.8f
+        val targetY = cardRect.bottom + cardRect.height() * 1.8f
 
         val dist = hypot(targetX - startX, targetY - startY)
         val cardDiag = hypot(cardRect.width(), cardRect.height())
-        val progressRemaining = (dist / cardDiag).coerceIn(0.12f, 1f)
+        val progressRemaining = (dist / (cardDiag * 2.0f)).coerceIn(0.25f, 1f)
 
         val flingSpeed = hypot(flingVx, flingVy)
         val animDuration: Long
         val animInterpolator: android.view.animation.Interpolator
 
-        if (flingSpeed > 900f) {
-            animDuration = ((dist / flingSpeed) * 1000f).toLong().coerceIn(120L, 250L)
-            animInterpolator = DecelerateInterpolator(1.2f)
+        if (flingSpeed > 800f) {
+            val speedFactor = (800f / flingSpeed.coerceAtMost(3200f)).coerceIn(0.55f, 1f)
+            animDuration = ((360L * speedFactor) * progressRemaining).toLong().coerceIn(280L, 380L)
+            animInterpolator = DecelerateInterpolator(1.3f)
         } else {
-            animDuration = (progressRemaining * 260f).toLong().coerceIn(140L, 260L)
-            animInterpolator = AccelerateInterpolator(1.25f)
+            animDuration = (420L * progressRemaining).toLong().coerceIn(340L, 460L)
+            animInterpolator = DecelerateInterpolator(1.5f)
         }
 
-        val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        peelAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = animDuration
             interpolator = animInterpolator
             addUpdateListener {
                 val f = it.animatedValue as Float
+                unlockProgress = f
                 currentTouchX = startX + (targetX - startX) * f
                 currentTouchY = startY + (targetY - startY) * f
                 invalidate()
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    peelAnimator = null
                     isAnimating = false
                     isUnlocking = false
                     isUnlocked = true
+                    unlockProgress = 1f
                     currentTouchX = targetX
                     currentTouchY = targetY
                     invalidate()
@@ -591,13 +615,15 @@ class VitaPeelView @JvmOverloads constructor(
                 }
             })
         }
-        anim.start()
+        peelAnimator?.start()
     }
 
     private fun triggerSpringBackAnimation(flingVx: Float = 0f, flingVy: Float = 0f) {
+        peelAnimator?.cancel()
         isAnimating = true
         isUnlocking = false
         isUnlocked = false
+        unlockProgress = 0f
         val startX = currentTouchX
         val startY = currentTouchY
         val peelRect = PeelRect(cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
@@ -605,9 +631,9 @@ class VitaPeelView @JvmOverloads constructor(
 
         val dist = hypot(idle.x - startX, idle.y - startY)
         val cardDiag = hypot(cardRect.width(), cardRect.height())
-        val animDuration = ((dist / cardDiag) * 300f).toLong().coerceIn(150L, 260L)
+        val animDuration = ((dist / cardDiag) * 320f).toLong().coerceIn(180L, 280L)
 
-        val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        peelAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = animDuration
             interpolator = OvershootInterpolator(1.15f)
             addUpdateListener {
@@ -618,6 +644,7 @@ class VitaPeelView @JvmOverloads constructor(
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    peelAnimator = null
                     isAnimating = false
                     isUnlocked = false
                     isUnlocking = false
@@ -628,7 +655,7 @@ class VitaPeelView @JvmOverloads constructor(
                 }
             })
         }
-        anim.start()
+        peelAnimator?.start()
     }
 
     private fun vibrateTouch() {
@@ -658,8 +685,10 @@ class VitaPeelView @JvmOverloads constructor(
         if (w <= 0 || h <= 0) return
 
         if (isUnlocked) {
-            // When unlocked, card sheet is completely gone: display the clean revealed underlying background!
-            drawUnderlyingLayer(canvas, 0f, 0f, w, h)
+            // When unlocked, card sheet is completely gone
+            if (isPreviewMode) {
+                drawUnderlyingLayer(canvas, 0f, 0f, w, h)
+            }
             return
         }
 
@@ -682,7 +711,9 @@ class VitaPeelView @JvmOverloads constructor(
 
         if (!peelEngine.hasFoldLine) {
             if (isUnlocking || (peelEngine.isThresholdMet && (touchX < cardRect.left || touchY > cardRect.bottom))) {
-                drawUnderlyingLayer(canvas, 0f, 0f, w, h)
+                if (isPreviewMode) {
+                    drawUnderlyingLayer(canvas, 0f, 0f, w, h)
+                }
                 return
             }
 
@@ -699,14 +730,31 @@ class VitaPeelView @JvmOverloads constructor(
         }
 
         // --- Active Peel ---
-        // 1. Draw base wallpaper behind the unpeeled card
-        drawBaseWallpaper(canvas, w, h)
+        if (isPreviewMode) {
+            // 1. Draw base wallpaper behind the unpeeled card
+            drawBaseWallpaper(canvas, w, h)
 
-        // 2. Draw REVEALED UNDERNEATH LAYER inside cardRect
-        canvas.save()
-        canvas.clipPath(cardPath)
-        drawUnderlyingLayer(canvas, cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
-        canvas.restore()
+            // 2. Draw REVEALED UNDERNEATH LAYER inside cardRect
+            canvas.save()
+            canvas.clipPath(cardPath)
+            drawUnderlyingLayer(canvas, cardRect.left, cardRect.top, cardRect.right, cardRect.bottom)
+            canvas.restore()
+        } else {
+            // Live lockscreen: Base wallpaper outside the card dissolves smoothly on unlock
+            val outerAlpha = if (isUnlocking) (1f - unlockProgress).coerceIn(0f, 1f) else 1f
+            if (outerAlpha > 0f) {
+                val sc = if (outerAlpha < 1f) {
+                    canvas.saveLayerAlpha(0f, 0f, w, h, (outerAlpha * 255).toInt())
+                } else {
+                    canvas.save()
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    canvas.clipOutPath(cardPath)
+                }
+                drawBaseWallpaper(canvas, w, h)
+                canvas.restoreToCount(sc)
+            }
+        }
 
         // 3. Card Peeling Geometry
         val p1X = peelEngine.p1X
@@ -749,9 +797,17 @@ class VitaPeelView @JvmOverloads constructor(
         canvas.restore()
 
         // Cutout line around card
-        if (cornerRadius > 0f) {
+        val cutoutAlpha = if (isUnlocking) (1f - unlockProgress).coerceIn(0f, 1f) else 1f
+        if (cornerRadius > 0f && cutoutAlpha > 0f) {
+            canvas.save()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                canvas.clipOutPath(cornerSidePolyPath)
+            }
+            cardCutoutShadowPaint.alpha = ((0x40 * cutoutAlpha).toInt())
+            cardCutoutPaint.alpha = ((0x70 * cutoutAlpha).toInt())
             canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardCutoutShadowPaint)
             canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, cardCutoutPaint)
+            canvas.restore()
         }
 
         // 4. Drop Shadow beneath the folded sheet onto the underlying photo
@@ -770,7 +826,9 @@ class VitaPeelView @JvmOverloads constructor(
             peelEngine.midX,
             peelEngine.midY
         )
+        val shadowAlpha = if (isUnlocking) (1f - (unlockProgress - 0.5f) / 0.5f).coerceIn(0f, 1f) else 1f
         dropShadowPaint.shader = unitShadowShader
+        dropShadowPaint.alpha = (shadowAlpha * 255).toInt()
 
         canvas.save()
         canvas.clipPath(cardPath)
@@ -794,7 +852,10 @@ class VitaPeelView @JvmOverloads constructor(
             touchX,
             touchY
         )
+        val flapAlpha = if (isUnlocking) (1f - (unlockProgress - 0.75f) / 0.25f).coerceIn(0f, 1f) else 1f
         peelBackPaint.shader = unitPeelBackShader
+        peelBackPaint.alpha = (flapAlpha * 255).toInt()
+        cardBorderPaint.alpha = (0x70 * flapAlpha).toInt()
 
         canvas.drawPath(foldedFlapPath, peelBackPaint)
         canvas.drawPath(foldedFlapPath, cardBorderPaint)
@@ -816,11 +877,25 @@ class VitaPeelView @JvmOverloads constructor(
             peelEngine.midY + ny * rollR
         )
         rollHighlightPaint.shader = unitRollHighlightShader
+        rollHighlightPaint.alpha = (shadowAlpha * 255).toInt()
 
         canvas.drawPath(rollPath, rollHighlightPaint)
 
         // 7. Top Info Bar
-        infoBar.draw(canvas)
+        val infoBarAlpha = if (isUnlocking) {
+            (1f - (unlockProgress - 0.2f) / 0.8f).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+        if (infoBarAlpha > 0f) {
+            if (infoBarAlpha < 1f) {
+                val sc = canvas.saveLayerAlpha(0f, 0f, w, (42f * density), (infoBarAlpha * 255).toInt())
+                infoBar.draw(canvas)
+                canvas.restoreToCount(sc)
+            } else {
+                infoBar.draw(canvas)
+            }
+        }
     }
 
     private fun updateBgPresetColors() {
